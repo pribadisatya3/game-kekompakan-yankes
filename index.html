@@ -36,7 +36,6 @@
     <div class="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
       
       <!-- Logo Bentuk Memanjang (Wide Horizontal Logo) -->
-      <!-- Catatan: Jika ingin memakai gambar PNG memanjang sendiri, ganti isi div ini dengan: <img src="logo-yankes-panjang.png" alt="Logo Yankes Badung" class="h-11 w-auto object-contain" /> -->
       <div onclick="goHome()" class="flex items-center gap-3 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-slate-900 via-sky-950 to-teal-900 text-white shadow-md cursor-pointer hover:opacity-95 transition select-none max-w-full overflow-hidden">
         <!-- Emblem Ikon Kesehatan -->
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-400 to-teal-400 flex items-center justify-center text-slate-950 shrink-0 shadow-inner">
@@ -74,8 +73,8 @@
           <i id="soundIcon" data-lucide="volume-2" class="w-4 h-4"></i>
         </button>
         <button onclick="openAdminModal()" class="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition">
-          <i data-lucide="layout-dashboard" class="w-4 h-4 text-teal-400"></i>
-          <span>Dashboard</span>
+          <i data-lucide="shield-check" class="w-4 h-4 text-teal-400"></i>
+          <span>Dashboard Admin</span>
         </button>
       </div>
     </div>
@@ -92,8 +91,8 @@
         <div class="flex items-center gap-2.5">
           <i data-lucide="bar-chart-3" class="w-5 h-5 text-teal-400"></i>
           <div>
-            <h2 class="font-bold text-base leading-tight">Dashboard Rekapitulasi Kekompakan Tim</h2>
-            <p class="text-[11px] text-slate-400">Seluruh hasil ronde, detail jawaban anggota, dan skor evaluasi</p>
+            <h2 class="font-bold text-base leading-tight">Dashboard Admin — Rekapitulasi Seluruh Peserta</h2>
+            <p class="text-[11px] text-slate-400">Hanya Admin yang dapat melihat perbandingan nilai dan detail jawaban semua peserta</p>
           </div>
         </div>
         <button onclick="closeAdminModal()" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition">
@@ -247,19 +246,7 @@
       screen: 'setup', // setup, round1, round2, round3, summary
       mode: 'single', // single | multi
       teams: [
-        {
-          id: 1,
-          name: 'Tim Pelayanan Kesehatan',
-          members: ['Staf 1', 'Staf 2', 'Staf 3', 'Staf 4'],
-          score: 0,
-          r1Harmony: 0,
-          r1Points: 0,
-          r1Details: [], // menyimpan riwayat pertanyaan & jawaban per anggota
-          r2Words: 0,
-          r2Points: 0,
-          r3Score: 0,
-          r3Choice: '-'
-        }
+        createBlankTeam(1, 'Tim Pelayanan Kesehatan', ['Staf 1', 'Staf 2', 'Staf 3', 'Staf 4'])
       ],
       activeTeamIdx: 0,
       // Round 1 state
@@ -279,10 +266,29 @@
       r3Timer: 15,
       r3Interval: null,
       r3SelectedOption: null,
+      // Private Result View State (untuk pemain melihat miliknya sendiri)
+      selectedPrivateTeamIdx: null,
+      selectedPrivateMemberName: null,
       // Admin state
       adminLoggedIn: false,
       expandedSessionId: null
     };
+
+    function createBlankTeam(id, name, members) {
+      return {
+        id,
+        name,
+        members,
+        score: 0,
+        r1Harmony: 0,
+        r1Points: 0,
+        r1Details: [],
+        r2Words: 0,
+        r2Points: 0,
+        r3Score: 0,
+        r3Choice: '-'
+      };
+    }
 
     function getHistory() {
       try {
@@ -300,7 +306,7 @@
       const record = {
         id: 'SESI-' + Date.now().toString().slice(-6),
         timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
-        mode: state.mode === 'single' ? '1 Tim Besar' : `${state.teams.length} Sub-Tim`,
+        mode: state.mode === 'single' ? '1 Tim Besar' : `${state.teams.length} Tim / Peserta`,
         avgHarmony: totalHarmony,
         teams: state.teams.map(t => ({
           name: t.name,
@@ -334,6 +340,8 @@
     function goHome() {
       clearTimers();
       state.screen = 'setup';
+      state.selectedPrivateTeamIdx = null;
+      state.selectedPrivateMemberName = null;
       render();
     }
 
@@ -356,13 +364,13 @@
         <div class="glass-card rounded-3xl p-6 sm:p-8">
           <div class="text-center max-w-2xl mx-auto mb-8">
             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-700 text-xs font-bold mb-3">
-              <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Ice Breaking &amp; Team Building
+              <i data-lucide="lock" class="w-3.5 h-3.5"></i> Mode Privasi Skor Aktif
             </span>
             <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Uji Kekompakan Tim Yankes
             </h2>
             <p class="text-sm text-slate-600 mt-2">
-              Tiga tantangan interaktif untuk mengukur seberapa satu frekuensi tim Anda dalam keseharian kantor maupun pelayanan publik.
+              Setiap peserta/tim hanya dapat melihat nilai dan hasil miliknya sendiri. Rekapitulasi keseluruhan hanya dapat diakses oleh Admin.
             </p>
           </div>
 
@@ -373,15 +381,15 @@
                 <span class="font-bold text-slate-900">Mode 1 Tim Besar</span>
                 <i data-lucide="users" class="w-5 h-5 text-sky-600"></i>
               </div>
-              <p class="text-xs text-slate-500">Cocok untuk ice breaking seluruh staf dalam satu sesi bersama.</p>
+              <p class="text-xs text-slate-500">Seluruh staf bermain dalam 1 tim; di akhir tiap staf hanya bisa membuka hasil pribadinya.</p>
             </button>
 
             <button onclick="setMode('multi')" class="p-4 rounded-2xl border-2 text-left transition ${state.mode === 'multi' ? 'border-sky-600 bg-sky-50/70' : 'border-slate-200 bg-white hover:border-slate-300'}">
               <div class="flex items-center justify-between mb-1">
-                <span class="font-bold text-slate-900">Mode Kompetisi (2–4 Tim)</span>
-                <i data-lucide="trophy" class="w-5 h-5 text-amber-500"></i>
+                <span class="font-bold text-slate-900">Mode Multi-Tim / Peserta (2–4)</span>
+                <i data-lucide="shield" class="w-5 h-5 text-amber-500"></i>
               </div>
-              <p class="text-xs text-slate-500">Adu kekompakan antar sub-tim / kelompok kerja untuk meraih skor tertinggi.</p>
+              <p class="text-xs text-slate-500">Setiap tim/peserta bermain bergiliran dan hanya dapat melihat nilainya sendiri.</p>
             </button>
           </div>
 
@@ -391,7 +399,7 @@
               <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Daftar Tim &amp; Anggota</h3>
               ${state.mode === 'multi' && state.teams.length < 4 ? `
                 <button onclick="addTeam()" class="inline-flex items-center gap-1 text-xs font-bold text-sky-600 hover:text-sky-700 bg-sky-50 px-3 py-1.5 rounded-lg">
-                  <i data-lucide="plus" class="w-3.5 h-3.5"></i> Tambah Tim
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i> Tambah Tim / Peserta
                 </button>
               ` : ''}
             </div>
@@ -402,7 +410,7 @@
                   <div class="flex items-center justify-between gap-2 mb-3">
                     <input type="text" value="${t.name}" onchange="updateTeamName(${idx}, this.value)"
                       class="font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm w-full focus:outline-none focus:border-sky-500"
-                      placeholder="Nama Tim" />
+                      placeholder="Nama Tim / Peserta" />
                     ${state.mode === 'multi' && state.teams.length > 2 ? `
                       <button onclick="removeTeam(${idx})" class="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -424,22 +432,6 @@
           </button>
         </div>
       `;
-    }
-
-    function createBlankTeam(id, name, members) {
-      return {
-        id,
-        name,
-        members,
-        score: 0,
-        r1Harmony: 0,
-        r1Points: 0,
-        r1Details: [],
-        r2Words: 0,
-        r2Points: 0,
-        r3Score: 0,
-        r3Choice: '-'
-      };
     }
 
     function setMode(mode) {
@@ -494,6 +486,8 @@
       state.r1TurnMemberIdx = 0;
       state.r1Answers = [];
       state.r1Revealed = false;
+      state.selectedPrivateTeamIdx = null;
+      state.selectedPrivateMemberName = null;
       state.screen = 'round1';
       render();
     }
@@ -518,7 +512,7 @@
 
       return `
         <div class="space-y-4">
-          ${renderScoreBar('Ronde 1: Satu Frekuensi', 'Pilih jawaban secara rahasia bergantian untuk mengukur kesamaan selera & insting tim.')}
+          ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi', 'Setiap anggota memilih jawaban secara rahasia bergantian.')}
 
           <div class="glass-card rounded-3xl p-6 sm:p-8">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -561,23 +555,15 @@
                 `).join('')}
               </div>
             ` : `
+              <!-- Hasil Ronde 1 untuk tim aktif saja -->
               <div class="p-5 rounded-2xl bg-gradient-to-br from-sky-600 to-teal-600 text-white mb-6 text-center">
-                <p class="text-xs uppercase tracking-wider font-bold text-sky-100">Tingkat Kekompakan Pertanyaan Ini</p>
+                <p class="text-xs uppercase tracking-wider font-bold text-sky-100">Skor Kekompakan ${team.name}</p>
                 <div class="text-4xl sm:text-5xl font-black my-1">${harmonyPct}%</div>
-                <p class="text-xs text-sky-100">Jawaban Paling Kompak: <strong class="text-white">${topAnswer}</strong> (+${harmonyPct} Poin)</p>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-6">
-                ${state.r1Answers.map(a => `
-                  <div class="p-3 rounded-xl border ${a.answer === topAnswer ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'} flex items-center justify-between">
-                    <span class="font-bold text-xs text-slate-700">${a.member}</span>
-                    <span class="text-xs font-semibold ${a.answer === topAnswer ? 'text-emerald-700' : 'text-slate-600'}">${a.answer}</span>
-                  </div>
-                `).join('')}
+                <p class="text-xs text-sky-100">Jawaban Mayoritas Tim: <strong class="text-white">${topAnswer}</strong> (+${harmonyPct} Poin)</p>
               </div>
 
               <button onclick="nextR1Step()" class="w-full py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition">
-                Lanjutkan
+                Lanjutkan Giliran Berikutnya
               </button>
             `}
           </div>
@@ -651,7 +637,7 @@
 
       return `
         <div class="space-y-4">
-          ${renderScoreBar('Ronde 2: Estafet Kata Kunci', 'Satu orang memberi petunjuk verbal tanpa menyebut kata tabu, anggota tim lainnya menebak cepat!')}
+          ${renderPrivateScoreBar('Ronde 2: Estafet Kata Kunci', 'Jelaskan kata utama tanpa menyebut kata tabu dalam 60 detik!')}
 
           <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
             <div class="flex items-center justify-between mb-6">
@@ -699,12 +685,12 @@
                     Benar! (+10)
                   </button>
                 </div>
-                <p class="text-xs font-bold text-slate-500 mt-4">Skor Sesi Ini: ${state.r2SessionScore} Poin (${state.r2CorrectCount} Kata Tertebak)</p>
+                <p class="text-xs font-bold text-slate-500 mt-4">Skor Sesi Anda: ${state.r2SessionScore} Poin (${state.r2CorrectCount} Kata Tertebak)</p>
               </div>
             ` : `
               <div class="py-6">
                 <h3 class="text-2xl font-extrabold text-slate-900 mb-1">Waktu Habis!</h3>
-                <p class="text-sm text-slate-600 mb-4">${team.name} berhasil menebak <strong>${state.r2CorrectCount} kata</strong> dengan tambahan <strong>${Math.max(0, state.r2SessionScore)} poin</strong>.</p>
+                <p class="text-sm text-slate-600 mb-4">${team.name} berhasil menebak <strong>${state.r2CorrectCount} kata</strong> (+<strong>${Math.max(0, state.r2SessionScore)} poin</strong>).</p>
                 <button onclick="nextR2Team()" class="px-8 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm">
                   Lanjutkan
                 </button>
@@ -774,12 +760,12 @@
 
       return `
         <div class="space-y-4">
-          ${renderScoreBar('Ronde 3: Misi Darurat Pelayanan', 'Diskusikan bersama tim dan putuskan tindakan terbaik dalam 15 detik!')}
+          ${renderPrivateScoreBar('Ronde 3: Misi Darurat Pelayanan', 'Putuskan tindakan pelayanan terbaik dalam 15 detik!')}
 
           <div class="glass-card rounded-3xl p-6 sm:p-8">
             <div class="flex items-center justify-between mb-4">
               <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-xs font-bold">
-                Tim: ${team.name}
+                Giliran: ${team.name}
               </span>
               <div class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold ${state.r3Timer <= 5 ? 'bg-rose-100 text-rose-600 animate-pulse-fast' : 'bg-slate-100 text-slate-700'}">
                 <i data-lucide="clock" class="w-3.5 h-3.5"></i>
@@ -803,9 +789,9 @@
                   <button ${state.r3SelectedOption !== null ? 'disabled' : ''} onclick="selectR3Option(${idx})"
                     class="w-full p-4 rounded-2xl border-2 text-left transition flex items-center justify-between gap-3 ${btnStyle}">
                     <span class="text-sm font-semibold">${opt.text}</span>
-                    ${state.r3SelectedOption !== null ? `
+                    ${state.r3SelectedOption !== null && isSelected ? `
                       <span class="shrink-0 text-xs font-extrabold px-2.5 py-1 rounded-lg bg-white shadow-sm">
-                        +${opt.score} Poin
+                        +${opt.score} Poin Anda
                       </span>
                     ` : ''}
                   </button>
@@ -816,7 +802,7 @@
             ${state.r3SelectedOption !== null ? `
               <div class="mt-6 flex justify-end">
                 <button onclick="nextR3Step()" class="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm">
-                  ${state.activeTeamIdx + 1 < state.teams.length ? 'Giliran Tim Berikutnya' : 'Lihat Hasil Akhir Kekompakan'}
+                  ${state.activeTeamIdx + 1 < state.teams.length ? 'Giliran Peserta Berikutnya' : 'Selesai & Cek Nilai Saya'}
                 </button>
               </div>
             ` : ''}
@@ -863,6 +849,8 @@
         startR3Timer();
       } else {
         saveSessionToHistory();
+        state.selectedPrivateTeamIdx = null;
+        state.selectedPrivateMemberName = null;
         state.screen = 'summary';
         playFanfare();
         if (typeof confetti === 'function') {
@@ -872,79 +860,223 @@
       render();
     }
 
-    // --- SCREEN 5: HASIL AKHIR & KLASEMEN ---
-    function renderSummary() {
-      const sorted = [...state.teams].sort((a, b) => b.score - a.score);
-
-      return `
-        <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
-          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3">
-            <i data-lucide="check-circle-2" class="w-4 h-4"></i> Semua Hasil Tersimpan ke Dashboard
-          </div>
-          <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">Rekapitulasi Kekompakan Tim</h2>
-          <p class="text-sm text-slate-600 mb-8">Evaluasi sinergi berdasarkan kesamaan frekuensi, kecepatan komunikasi, dan ketepatan keputusan.</p>
-
-          <div class="space-y-4 max-w-2xl mx-auto mb-8 text-left">
-            ${sorted.map((t, idx) => {
-              const pred = getPredicate(t.score);
-              return `
-                <div class="p-5 rounded-2xl bg-white border-2 ${idx === 0 ? 'border-amber-400 shadow-md' : 'border-slate-200'}">
-                  <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                    <div class="flex items-center gap-2.5">
-                      <span class="w-8 h-8 rounded-xl ${idx === 0 ? 'bg-amber-400 text-slate-900' : 'bg-slate-100 text-slate-700'} font-black text-sm flex items-center justify-center">
-                        #${idx + 1}
-                      </span>
-                      <div>
-                        <h3 class="font-extrabold text-slate-900">${t.name}</h3>
-                        <p class="text-[11px] text-slate-500">${t.members.join(', ')}</p>
-                      </div>
-                    </div>
-                    <div class="text-right">
-                      <div class="text-2xl font-black text-sky-600">${t.score} <span class="text-xs font-bold text-slate-400">PTS</span></div>
-                    </div>
-                  </div>
-
-                  <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
-                    <span class="px-3 py-1 rounded-full border text-xs font-bold ${pred.badge}">
-                      ${pred.emoji} ${pred.title}
-                    </span>
-                    <div class="flex flex-wrap gap-3 text-[11px] font-semibold text-slate-500">
-                      <span>R1 Frekuensi: <strong>${t.r1Harmony}% (+${t.r1Points})</strong></span>
-                      <span>R2 Estafet: <strong>${t.r2Words} kata (+${t.r2Points})</strong></span>
-                      <span>R3 Misi: <strong>+${t.r3Score}</strong></span>
-                    </div>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-
-          <div class="flex flex-wrap justify-center gap-3">
-            <button onclick="openAdminModal()" class="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm flex items-center gap-2">
-              <i data-lucide="layout-dashboard" class="w-4 h-4 text-teal-400"></i>
-              <span>Lihat Semua Hasil di Dashboard</span>
-            </button>
-            <button onclick="goHome()" class="px-6 py-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm">
-              Main Lagi
-            </button>
-          </div>
-        </div>
-      `;
-    }
-
-    function renderScoreBar(title, subtitle) {
+    // --- PRIVATE SCORE BAR (HANYA MENAMPILKAN SKOR PESERTA AKTIF) ---
+    function renderPrivateScoreBar(title, subtitle) {
+      const activeTeam = state.teams[state.activeTeamIdx];
       return `
         <div class="glass-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 class="font-extrabold text-sm sm:text-base text-slate-900">${title}</h2>
             <p class="text-xs text-slate-500">${subtitle}</p>
           </div>
-          <div class="flex flex-wrap gap-2">
-            ${state.teams.map((t, idx) => `
-              <div class="px-3 py-1.5 rounded-xl text-xs font-bold border ${idx === state.activeTeamIdx ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-700 border-slate-200'}">
-                ${t.name}: <span class="font-black">${t.score}</span>
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-semibold text-slate-500 hidden sm:inline">
+              Peserta ${state.activeTeamIdx + 1}/${state.teams.length}
+            </span>
+            <div class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-sky-600 text-white shadow-xs flex items-center gap-1.5">
+              <i data-lucide="user-check" class="w-3.5 h-3.5"></i>
+              <span>${activeTeam.name}: <strong class="font-black">${activeTeam.score} PTS</strong></span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- SCREEN 5: HASIL PRIVAT PESERTA (HANYA MELIHAT NILAINYA SENDIRI) ---
+    function selectPrivateTeam(idx) {
+      state.selectedPrivateTeamIdx = idx;
+      render();
+    }
+
+    function selectPrivateMember(name) {
+      state.selectedPrivateMemberName = name;
+      render();
+    }
+
+    function renderSummary() {
+      // KASUS A: Mode Multi-Tim (Setiap Tim memilih namanya sendiri untuk melihat skor pribadinya)
+      if (state.mode === 'multi') {
+        const chosenTeam = state.selectedPrivateTeamIdx !== null ? state.teams[state.selectedPrivateTeamIdx] : null;
+        const pred = chosenTeam ? getPredicate(chosenTeam.score) : null;
+
+        return `
+          <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3">
+              <i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Hasil Privat Peserta
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">Cek Nilai &amp; Hasil Anda</h2>
+            <p class="text-sm text-slate-600 max-w-xl mx-auto mb-6">
+              Pilih <strong>nama tim/peserta Anda sendiri</strong> di bawah ini untuk melihat rincian nilai Anda. Skor dan peringkat peserta lain disembunyikan untuk menjaga privasi.
+            </p>
+
+            <!-- Pemilih Tim Sendiri -->
+            <div class="flex flex-wrap justify-center gap-2.5 mb-8">
+              ${state.teams.map((t, idx) => `
+                <button onclick="selectPrivateTeam(${idx})"
+                  class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${state.selectedPrivateTeamIdx === idx ? 'border-sky-600 bg-sky-600 text-white shadow-md' : 'border-slate-200 bg-white text-slate-700 hover:border-sky-400'}">
+                  ${t.name}
+                </button>
+              `).join('')}
+            </div>
+
+            ${chosenTeam ? `
+              <div class="max-w-xl mx-auto p-6 rounded-2xl bg-white border-2 border-sky-200 shadow-md text-left mb-8">
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+                  <div>
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-sky-600">Kartu Hasil Pribadi</span>
+                    <h3 class="text-xl font-extrabold text-slate-900">${chosenTeam.name}</h3>
+                    <p class="text-xs text-slate-500">${chosenTeam.members.join(', ')}</p>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-3xl font-black text-sky-600">${chosenTeam.score}</div>
+                    <span class="text-[11px] font-bold text-slate-400">TOTAL POIN ANDA</span>
+                  </div>
+                </div>
+
+                <div class="my-4">
+                  <span class="px-3 py-1 rounded-full border text-xs font-bold ${pred.badge}">
+                    ${pred.emoji} ${pred.title}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2.5 text-center pt-2">
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-[11px] text-slate-500 font-semibold">Satu Frekuensi</p>
+                    <p class="text-base font-black text-slate-900 mt-0.5">${chosenTeam.r1Harmony}%</p>
+                    <p class="text-[10px] text-sky-600 font-bold">+${chosenTeam.r1Points} pts</p>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-[11px] text-slate-500 font-semibold">Estafet Kata</p>
+                    <p class="text-base font-black text-slate-900 mt-0.5">${chosenTeam.r2Words} kata</p>
+                    <p class="text-[10px] text-teal-600 font-bold">+${chosenTeam.r2Points} pts</p>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-[11px] text-slate-500 font-semibold">Misi Pelayanan</p>
+                    <p class="text-base font-black text-slate-900 mt-0.5">+${chosenTeam.r3Score}</p>
+                    <p class="text-[10px] text-indigo-600 font-bold">Keputusan</p>
+                  </div>
+                </div>
               </div>
+            ` : `
+              <div class="max-w-md mx-auto p-6 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs mb-8">
+                Silakan klik tombol nama tim/peserta Anda di atas untuk menampilkan nilai Anda sendiri.
+              </div>
+            `}
+
+            <div class="flex flex-wrap justify-center gap-3">
+              <button onclick="goHome()" class="px-6 py-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm">
+                Selesai / Kembali ke Awal
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      // KASUS B: Mode 1 Tim Besar (Setiap anggota memilih namanya sendiri untuk melihat hasil pribadinya)
+      const team = state.teams[0];
+      const chosenMember = state.selectedPrivateMemberName;
+
+      // Hitung skor keselarasan pribadi anggota tersebut terhadap mayoritas tim
+      let personalMatchCount = 0;
+      const personalHistory = [];
+      if (chosenMember && team.r1Details) {
+        team.r1Details.forEach((d, idx) => {
+          const found = d.answers.find(a => a.member === chosenMember);
+          if (found) {
+            const isMatched = found.answer === d.topAnswer;
+            if (isMatched) personalMatchCount++;
+            personalHistory.push({
+              qNum: idx + 1,
+              question: d.question,
+              myAnswer: found.answer,
+              isMatched
+            });
+          }
+        });
+      }
+      const personalHarmony = personalHistory.length
+        ? Math.round((personalMatchCount / personalHistory.length) * 100)
+        : 0;
+      const personalTotalScore = (personalHarmony) + team.r2Points + team.r3Score;
+      const pred = getPredicate(personalTotalScore);
+
+      return `
+        <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3">
+            <i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Hasil Privat Anggota
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">Cek Nilai &amp; Hasil Pribadi Anda</h2>
+          <p class="text-sm text-slate-600 max-w-xl mx-auto mb-6">
+            Pilih <strong>nama Anda sendiri</strong> di bawah ini untuk melihat skor dan hasil Anda. Nilai serta jawaban anggota lain tidak ditampilkan.
+          </p>
+
+          <!-- Pemilih Nama Anggota Sendiri -->
+          <div class="flex flex-wrap justify-center gap-2 mb-8">
+            ${team.members.map(m => `
+              <button onclick="selectPrivateMember('${m.replace(/'/g, "\\'")}')"
+                class="px-4 py-2 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${chosenMember === m ? 'border-sky-600 bg-sky-600 text-white shadow-md' : 'border-slate-200 bg-white text-slate-700 hover:border-sky-400'}">
+                ${m}
+              </button>
             `).join('')}
+          </div>
+
+          ${chosenMember ? `
+            <div class="max-w-xl mx-auto p-6 rounded-2xl bg-white border-2 border-sky-200 shadow-md text-left mb-8">
+              <div class="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+                <div>
+                  <span class="text-[11px] font-bold uppercase tracking-wider text-sky-600">Kartu Nilai Pribadi</span>
+                  <h3 class="text-xl font-extrabold text-slate-900">${chosenMember}</h3>
+                  <p class="text-xs text-slate-500">${team.name}</p>
+                </div>
+                <div class="text-right">
+                  <div class="text-3xl font-black text-sky-600">${personalTotalScore}</div>
+                  <span class="text-[11px] font-bold text-slate-400">NILAI ANDA</span>
+                </div>
+              </div>
+
+              <div class="my-4">
+                <span class="px-3 py-1 rounded-full border text-xs font-bold ${pred.badge}">
+                  ${pred.emoji} ${pred.title}
+                </span>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2.5 text-center mb-4">
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <p class="text-[11px] text-slate-500 font-semibold">Frekuensi Anda</p>
+                  <p class="text-base font-black text-slate-900 mt-0.5">${personalHarmony}%</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <p class="text-[11px] text-slate-500 font-semibold">Estafet Kata</p>
+                  <p class="text-base font-black text-slate-900 mt-0.5">+${team.r2Points} pts</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <p class="text-[11px] text-slate-500 font-semibold">Misi Pelayanan</p>
+                  <p class="text-base font-black text-slate-900 mt-0.5">+${team.r3Score} pts</p>
+                </div>
+              </div>
+
+              <div class="space-y-2 pt-3 border-t border-slate-100">
+                <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Catatan Jawaban Anda:</p>
+                ${personalHistory.map(item => `
+                  <div class="p-2.5 rounded-xl bg-slate-50 text-xs flex items-center justify-between gap-2">
+                    <span class="text-slate-600 truncate">Q${item.qNum}: ${item.myAnswer}</span>
+                    <span class="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${item.isMatched ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}">
+                      ${item.isMatched ? 'Satu Frekuensi' : 'Pilihan Unik'}
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : `
+            <div class="max-w-md mx-auto p-6 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs mb-8">
+              Silakan klik tombol nama Anda di atas untuk melihat nilai dan hasil pribadi Anda sendiri.
+            </div>
+          `}
+
+          <div class="flex flex-wrap justify-center gap-3">
+            <button onclick="goHome()" class="px-6 py-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm">
+              Selesai / Kembali ke Awal
+            </button>
           </div>
         </div>
       `;
@@ -975,14 +1107,14 @@
             <div class="w-14 h-14 rounded-2xl bg-slate-900 text-teal-400 flex items-center justify-center mx-auto mb-4">
               <i data-lucide="lock" class="w-7 h-7"></i>
             </div>
-            <h3 class="text-lg font-extrabold text-slate-900 mb-1">Verifikasi Akses Dashboard</h3>
-            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk melihat seluruh rekapitulasi hasil &amp; ekspor laporan (PIN default: <strong>1234</strong>).</p>
+            <h3 class="text-lg font-extrabold text-slate-900 mb-1">Verifikasi Akses Admin</h3>
+            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk melihat rekapitulasi seluruh peserta &amp; ekspor laporan (PIN default: <strong>1234</strong>).</p>
             <input id="adminPinInput" type="password" maxlength="8" placeholder="••••"
               onkeydown="if(event.key==='Enter') verifyAdminPin()"
               class="w-full text-center tracking-[0.5em] text-xl font-black border-2 border-slate-200 rounded-xl py-3 mb-3 focus:outline-none focus:border-sky-600" />
             <p id="adminPinError" class="text-xs text-rose-600 font-semibold mb-3 hidden">PIN salah. Silakan coba lagi.</p>
             <button onclick="verifyAdminPin()" class="w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm">
-              Buka Dashboard Hasil
+              Masuk Dashboard Admin
             </button>
           </div>
         `;
@@ -1010,8 +1142,8 @@
               <p class="text-2xl font-black text-slate-900 mt-1">${totalSessions} <span class="text-xs font-medium text-slate-400">Sesi</span></p>
             </div>
             <div class="p-4 rounded-2xl bg-indigo-50 border border-indigo-200">
-              <p class="text-[11px] font-semibold text-indigo-700">Total Tim Terevaluasi</p>
-              <p class="text-2xl font-black text-indigo-950 mt-1">${totalTeamsCount} <span class="text-xs font-medium text-indigo-400">Tim</span></p>
+              <p class="text-[11px] font-semibold text-indigo-700">Total Tim / Peserta</p>
+              <p class="text-2xl font-black text-indigo-950 mt-1">${totalTeamsCount} <span class="text-xs font-medium text-indigo-400">Peserta</span></p>
             </div>
             <div class="p-4 rounded-2xl bg-sky-50 border border-sky-200">
               <p class="text-[11px] font-semibold text-sky-700">Rata-Rata Satu Frekuensi</p>
@@ -1032,8 +1164,8 @@
           <div>
             <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div>
-                <h4 class="font-bold text-sm text-slate-800">Rekapitulasi Seluruh Hasil Permainan &amp; Rincian Ronde</h4>
-                <p class="text-[11px] text-slate-500">Klik tombol <strong>"Lihat Rincian"</strong> pada setiap sesi untuk melihat jawaban detail masing-masing anggota tim.</p>
+                <h4 class="font-bold text-sm text-slate-800">Rekapitulasi Seluruh Peserta &amp; Rincian Ronde</h4>
+                <p class="text-[11px] text-slate-500">Klik tombol <strong>"Lihat Rincian Jawaban"</strong> untuk melihat detail jawaban tiap anggota.</p>
               </div>
               ${totalSessions > 0 ? `
                 <button onclick="clearHistory()" class="text-xs font-semibold text-rose-600 hover:underline">Hapus Semua Data</button>
@@ -1050,7 +1182,6 @@
                   const isExpanded = state.expandedSessionId === h.id;
                   return `
                     <div class="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-xs">
-                      <!-- Header Sesi -->
                       <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
                         <div class="flex items-center gap-2.5">
                           <span class="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-bold text-xs">${h.id}</span>
@@ -1063,12 +1194,11 @@
                         </button>
                       </div>
 
-                      <!-- Tabel Skor per Tim dalam Sesi Ini -->
                       <div class="overflow-x-auto">
                         <table class="w-full text-left border-collapse text-xs">
                           <thead>
                             <tr class="bg-white text-slate-500 font-bold border-b border-slate-100 text-[11px] uppercase">
-                              <th class="p-3">Tim &amp; Anggota</th>
+                              <th class="p-3">Tim / Peserta</th>
                               <th class="p-3 text-center">R1: Frekuensi</th>
                               <th class="p-3 text-center">R2: Estafet Kata</th>
                               <th class="p-3 text-center">R3: Misi Pelayanan</th>
@@ -1108,10 +1238,9 @@
                         </table>
                       </div>
 
-                      <!-- Panel Rincian Jawaban Anggota (Expandable) -->
                       ${isExpanded ? `
                         <div class="p-4 bg-sky-50/60 border-t border-sky-100 space-y-4">
-                          <h5 class="font-extrabold text-xs uppercase tracking-wider text-sky-900">Detail Jawaban &amp; Keputusan Per Tim</h5>
+                          <h5 class="font-extrabold text-xs uppercase tracking-wider text-sky-900">Detail Jawaban &amp; Keputusan Per Peserta</h5>
                           ${h.teams.map(t => `
                             <div class="p-3.5 rounded-xl bg-white border border-sky-200/80 space-y-2.5">
                               <div class="font-bold text-xs text-slate-900 border-b border-slate-100 pb-1.5 flex items-center justify-between">
@@ -1185,7 +1314,7 @@
         'ID Sesi',
         'Waktu',
         'Mode',
-        'Nama Tim',
+        'Nama Tim / Peserta',
         'Anggota',
         'R1 Satu Frekuensi (%)',
         'R1 Poin',
