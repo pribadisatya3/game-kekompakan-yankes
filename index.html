@@ -237,7 +237,7 @@
           <span>Dashboard</span>
         </button>
 
-        <button onclick="openAdminModal()" class="flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition">
+        <button onclick="openAdminModal('recap')" class="flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition">
           <i data-lucide="shield-check" class="w-4 h-4 text-teal-400"></i>
           <span class="hidden sm:inline">Admin</span>
         </button>
@@ -255,8 +255,8 @@
         <div class="flex items-center gap-2.5">
           <i data-lucide="database" class="w-5 h-5 text-teal-400"></i>
           <div>
-            <h2 class="font-bold text-sm sm:text-base leading-tight">Dashboard Admin — Database Supabase</h2>
-            <p class="text-slate-400" style="font-size: 11px;">Rekapitulasi cloud seluruh peserta, peran pemain, dan rincian jawaban</p>
+            <h2 class="font-bold text-sm sm:text-base leading-tight">Panel Admin — Database &amp; Manajemen Tim</h2>
+            <p class="text-slate-400" style="font-size: 11px;">Kelola susunan tim/anggota &amp; pantau rekapitulasi cloud Supabase</p>
           </div>
         </div>
         <button onclick="closeAdminModal()" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition">
@@ -360,7 +360,7 @@
     // ==========================================
     // 2. BANK SOAL & DATA GAME YANKES BADUNG
     // ==========================================
-    const ROUND_DURATION_SECONDS = 30; // Waktu menjawab 30 detik di setiap ronde
+    const ROUND_DURATION_SECONDS = 30;
 
     const ROUND1_QUESTIONS = [
       {
@@ -451,12 +451,12 @@
         r2Points: 0,
         r2Speaker: '-',
         r2Completed: false,
-        r2PlayerSubmissions: {}, // Menyimpan hasil Ronde 2 per anggota
+        r2PlayerSubmissions: {},
         r3Score: 0,
         r3Details: [],
         r3Completed: false,
-        r3PlayerSubmissions: {}, // Menyimpan hasil Ronde 3 per anggota
-        completedPlayers: {}     // Menandai anggota yang telah menuntaskan R1 -> R2 -> R3
+        r3PlayerSubmissions: {},
+        completedPlayers: {}
       };
     }
 
@@ -489,7 +489,10 @@
           updateDbStatusBadge(true);
           if (data && Array.isArray(data.teams_data) && data.teams_data.length > 0) {
             state.teams = data.teams_data.map((t, idx) => createBlankTeam(t.id || idx + 1, t.name, [...t.members]));
+            if (state.activeTeamIdx >= state.teams.length) state.activeTeamIdx = 0;
+            if (state.dashboardCompetingTeamIdx >= state.teams.length) state.dashboardCompetingTeamIdx = 0;
             if (state.screen === 'setup' || state.screen === 'summary') render();
+            if (state.adminLoggedIn && state.adminTab === 'teams') renderAdminBody();
           }
         } else {
           updateDbStatusBadge(false, 'Cek Tabel Supabase');
@@ -499,7 +502,7 @@
       }
     }
 
-    async function persistTeamsConfig() {
+    async function persistTeamsConfig(showFeedback = false) {
       const payload = state.teams.map(t => ({
         id: t.id,
         name: t.name,
@@ -521,8 +524,21 @@
               teams_data: payload,
               updated_at: new Date().toISOString()
             }, { onConflict: 'mode' });
-          if (!error) updateDbStatusBadge(true);
+          if (!error) {
+            updateDbStatusBadge(true);
+            if (showFeedback) {
+              state.adminTeamSaveMsg = 'Susunan tim & anggota berhasil disimpan ke Supabase!';
+              renderAdminBody();
+              setTimeout(() => {
+                state.adminTeamSaveMsg = '';
+                if (state.adminLoggedIn && state.adminTab === 'teams') renderAdminBody();
+              }, 3500);
+            }
+          }
         } catch (e) {}
+      } else if (showFeedback) {
+        state.adminTeamSaveMsg = 'Susunan tim & anggota tersimpan di penyimpanan lokal.';
+        renderAdminBody();
       }
     }
 
@@ -531,8 +547,11 @@
       mode: 'multi',
       teams: loadLocalTeams('multi'),
       newMemberDrafts: {},
-      activeTeamIdx: 0,
-      currentPlayerName: null, // Pemain aktif yang sedang menjalani rangkaian Ronde 1 -> Ronde 2 -> Ronde 3
+      adminMemberDrafts: {},
+      adminNewTeamName: '',
+      adminTeamSaveMsg: '',
+      activeTeamIdx: 0, // Tim yang dipilih untuk bermain di perangkat ini
+      currentPlayerName: null,
       // Round 1 (30 detik per pertanyaan)
       r1SelectedMember: null,
       r1PlayerQIdx: 0,
@@ -565,6 +584,7 @@
       saveStatus: 'idle',
       // Admin state
       adminLoggedIn: false,
+      adminTab: 'recap', // 'recap' | 'teams'
       adminLoading: false,
       adminHistoryCache: [],
       expandedSessionId: null
@@ -604,40 +624,36 @@
       }
     }
 
-    async function saveSessionToDatabase(forceSave = false) {
-      if (state.sessionSavedOnce && !forceSave) return;
-      state.sessionSavedOnce = true;
+    // Simpan hasil tim yang selesai bermain ke Supabase (mendukung bermain bersamaan antar perangkat)
+    async function saveTeamSessionToDatabase(teamToSave) {
       state.saveStatus = 'saving';
       render();
 
-      const totalHarmony = Math.round(
-        state.teams.reduce((acc, t) => acc + t.r1Harmony, 0) / state.teams.length
-      );
-      const sessionCode = 'SESI-' + Date.now().toString().slice(-6);
+      const sessionCode = 'TIM-' + Date.now().toString().slice(-6);
       const timestampLabel = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-      const modeLabel = state.mode === 'single' ? '1 Tim Besar' : `${state.teams.length} Tim`;
-      const teamsPayload = state.teams.map(t => ({
-        name: t.name,
-        members: [...t.members],
-        score: t.score,
-        r1Harmony: t.r1Harmony,
-        r1Points: t.r1Points,
-        r1Details: t.r1Details || [],
-        r2Words: t.r2Words,
-        r2Points: t.r2Points,
-        r2Speaker: t.r2Speaker || '-',
-        r3Score: t.r3Score,
-        r3Details: t.r3Details || [],
-        predicate: getPredicate(t.score).title
-      }));
+      const modeLabel = `${teamToSave.name} (Paralel)`;
+      const singleTeamPayload = [{
+        name: teamToSave.name,
+        members: [...teamToSave.members],
+        score: teamToSave.score,
+        r1Harmony: teamToSave.r1Harmony,
+        r1Points: teamToSave.r1Points,
+        r1Details: teamToSave.r1Details || [],
+        r2Words: teamToSave.r2Words,
+        r2Points: teamToSave.r2Points,
+        r2Speaker: teamToSave.r2Speaker || '-',
+        r3Score: teamToSave.r3Score,
+        r3Details: teamToSave.r3Details || [],
+        predicate: getPredicate(teamToSave.score).title
+      }];
 
       const localHistory = getLocalHistory();
       localHistory.unshift({
         id: sessionCode,
         timestamp: timestampLabel,
         mode: modeLabel,
-        avgHarmony: totalHarmony,
-        teams: teamsPayload
+        avgHarmony: teamToSave.r1Harmony,
+        teams: singleTeamPayload
       });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(localHistory));
 
@@ -649,8 +665,8 @@
               session_code: sessionCode,
               timestamp_label: timestampLabel,
               mode: modeLabel,
-              avg_harmony: totalHarmony,
-              teams_data: teamsPayload
+              avg_harmony: teamToSave.r1Harmony,
+              teams_data: singleTeamPayload
             });
 
           if (error) throw error;
@@ -693,7 +709,7 @@
         state.selectedPrivateTeamIdx = preselectTeamIdx;
       } else {
         if (!state.teams[state.dashboardCompetingTeamIdx]) {
-          state.dashboardCompetingTeamIdx = 0;
+          state.dashboardCompetingTeamIdx = state.activeTeamIdx || 0;
         }
         if (state.selectedPrivateTeamIdx === null || !state.teams[state.selectedPrivateTeamIdx]) {
           state.selectedPrivateTeamIdx = state.dashboardCompetingTeamIdx;
@@ -704,13 +720,6 @@
       }
       state.screen = 'summary';
       render();
-
-      const allPlayersDone = state.teams.every(t =>
-        t.members.every(m => Boolean(t.completedPlayers[m]))
-      );
-      if (allPlayersDone && !state.sessionSavedOnce) {
-        await saveSessionToDatabase();
-      }
     }
 
     // Memilih tim yang akan berlomba di Menu Dashboard
@@ -769,8 +778,17 @@
     }
 
     // ==========================================
-    // 4. SCREEN RENDERERS (TAMPILAN AWAL)
+    // 4. SCREEN RENDERERS (TAMPILAN AWAL — PILIH TIM BERMAIN BERSAMAAN)
     // ==========================================
+    function selectSetupActiveTeam(tIdx) {
+      if (!state.teams[tIdx]) return;
+      playTone(560, 'sine', 0.08, 0.1);
+      state.activeTeamIdx = tIdx;
+      state.dashboardCompetingTeamIdx = tIdx;
+      state.selectedPrivateTeamIdx = tIdx;
+      render();
+    }
+
     function render() {
       const app = document.getElementById('app');
       if (state.screen === 'setup') app.innerHTML = renderSetup();
@@ -783,13 +801,15 @@
 
     function renderSetup() {
       const teamAccents = [
-        { border: 'border-sky-200', badgeBg: 'bg-sky-600', chipBg: 'bg-sky-50 border-sky-200 text-sky-900', avatarBg: 'bg-sky-600 text-white' },
-        { border: 'border-teal-200', badgeBg: 'bg-teal-600', chipBg: 'bg-teal-50 border-teal-200 text-teal-950', avatarBg: 'bg-teal-600 text-white' },
-        { border: 'border-indigo-200', badgeBg: 'bg-indigo-600', chipBg: 'bg-indigo-50 border-indigo-200 text-indigo-950', avatarBg: 'bg-indigo-600 text-white' },
-        { border: 'border-amber-200', badgeBg: 'bg-amber-500', chipBg: 'bg-amber-50 border-amber-200 text-amber-900', avatarBg: 'bg-amber-500 text-white' }
+        { border: 'border-sky-600', idleBorder: 'border-sky-200', bg: 'bg-sky-50', badgeBg: 'bg-sky-600', chipBg: 'bg-white border-sky-200 text-sky-900', avatarBg: 'bg-sky-600 text-white' },
+        { border: 'border-teal-600', idleBorder: 'border-teal-200', bg: 'bg-teal-50', badgeBg: 'bg-teal-600', chipBg: 'bg-white border-teal-200 text-teal-950', avatarBg: 'bg-teal-600 text-white' },
+        { border: 'border-indigo-600', idleBorder: 'border-indigo-200', bg: 'bg-indigo-50', badgeBg: 'bg-indigo-600', chipBg: 'bg-white border-indigo-200 text-indigo-950', avatarBg: 'bg-indigo-600 text-white' },
+        { border: 'border-amber-500', idleBorder: 'border-amber-200', bg: 'bg-amber-50', badgeBg: 'bg-amber-500', chipBg: 'bg-white border-amber-200 text-amber-900', avatarBg: 'bg-amber-500 text-white' }
       ];
 
       const totalPlayers = state.teams.reduce((sum, t) => sum + t.members.length, 0);
+      const selectedTeamIdx = state.teams[state.activeTeamIdx] ? state.activeTeamIdx : 0;
+      const selectedTeam = state.teams[selectedTeamIdx];
 
       return `
         <div class="space-y-5 sm:space-y-6">
@@ -802,7 +822,7 @@
               <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-teal-300 font-bold border border-teal-400" style="background: rgba(13, 148, 136, 0.25); font-size: 11px;">
                   <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-                  <span>ALUR BERUNTUN: RONDE 1 → RONDE 2 → RONDE 3 → DASHBOARD</span>
+                  <span>KOMPETISI PARALEL ANTAR TIM • 3 RONDE @30 DETIK</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sky-200 font-semibold" style="background: rgba(255, 255, 255, 0.1); font-size: 11px;">
                   <i data-lucide="users" class="w-3.5 h-3.5 text-sky-300"></i>
@@ -814,10 +834,10 @@
                 Uji Kekompakan &amp; <span class="text-teal-300">Satu Frekuensi</span> Tim Yankes
               </h1>
               <p class="text-xs sm:text-sm text-sky-100 mt-2.5 max-w-2xl leading-relaxed">
-                Setiap peserta memilih namanya, menyelesaikan <strong>Ronde 1 → Ronde 2 → Ronde 3</strong> (masing-masing berdurasi <strong>30 detik</strong>), dan setelah seluruh ronde selesai langsung diarahkan ke <strong>Menu Dashboard</strong>.
+                Pilih <strong>Tim 1</strong> atau <strong>Tim 2</strong> di perangkat masing-masing agar setiap tim dapat <strong>bermain dalam waktu bersamaan</strong> melewati <strong>Ronde 1 → Ronde 2 → Ronde 3</strong>.
               </p>
 
-              <!-- 3 KARTU RINGKASAN RONDE (MASING-MASING 30 DETIK) -->
+              <!-- 3 KARTU RINGKASAN RONDE -->
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mt-6">
                 <div class="p-3.5 rounded-2xl border" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14);">
                   <div class="flex items-center justify-between gap-2 mb-1.5">
@@ -831,7 +851,7 @@
                   </div>
                   <p class="font-bold text-xs text-white mb-0.5">Satu Frekuensi</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Jawab 5 pertanyaan kebiasaan kerja tim, lalu otomatis lanjut ke Ronde 2.
+                    Jawab 5 pertanyaan kebiasaan kerja tim, lalu lanjut ke Ronde 2.
                   </p>
                 </div>
 
@@ -847,7 +867,7 @@
                   </div>
                   <p class="font-bold text-xs text-white mb-0.5">Estafet Kata Kunci</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Tebak istilah layanan kesehatan selama 30 detik, lalu lanjut ke Ronde 3.
+                    Tebak istilah layanan kesehatan 30 detik, lalu lanjut ke Ronde 3.
                   </p>
                 </div>
 
@@ -870,12 +890,18 @@
             </div>
           </div>
 
-          <!-- PANEL KONFIGURASI MODE & TIM -->
+          <!-- PANEL KONFIGURASI MODE & PILIH TIM BERMAIN -->
           <div class="glass-card rounded-3xl p-5 sm:p-7">
             <div class="mb-6">
-              <div class="flex items-center gap-2 mb-3">
-                <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">1</span>
-                <h2 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">Pilih Mode Permainan</h2>
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">1</span>
+                  <h2 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">Pilih Mode Permainan</h2>
+                </div>
+                <button onclick="openAdminModal('teams')" class="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-sky-700 bg-slate-100 hover:bg-sky-50 px-2.5 py-1 rounded-lg transition">
+                  <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+                  <span>Kelola Tim di Admin</span>
+                </button>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -886,8 +912,8 @@
                         <i data-lucide="swords" class="w-5 h-5"></i>
                       </div>
                       <div>
-                        <span class="font-extrabold text-sm text-slate-900 block">Kompetisi Antar Tim</span>
-                        <span class="font-semibold text-sky-700" style="font-size: 11px;">2–4 Tim • R1 → R2 → R3 → Dashboard</span>
+                        <span class="font-extrabold text-sm text-slate-900 block">Main Paralel Antar Tim</span>
+                        <span class="font-semibold text-sky-700" style="font-size: 11px;">Tim 1 &amp; Tim 2 Main Bersamaan</span>
                       </div>
                     </div>
                     <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${state.mode === 'multi' ? 'bg-sky-600 text-white' : 'border-2 border-slate-300'}">
@@ -895,7 +921,7 @@
                     </div>
                   </div>
                   <p class="text-xs text-slate-500 mt-2.5 leading-relaxed">
-                    Tiap tim bersaing dalam 3 ronde berwaktu 30 detik dan dapat dipilih langsung di Menu Dashboard.
+                    Pilih <strong>Tim 1</strong> atau <strong>Tim 2</strong> di bawah ini agar masing-masing tim bisa bermain dalam waktu bersamaan.
                   </p>
                 </button>
 
@@ -921,12 +947,14 @@
               </div>
             </div>
 
-            <!-- Langkah 2: Susunan Tim & Anggota -->
+            <!-- Langkah 2: Pilih Tim yang Akan Bermain & Daftar Anggota -->
             <div class="mb-7">
               <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div class="flex items-center gap-2">
                   <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">2</span>
-                  <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">Atur Nama Tim &amp; Daftar Pemain</h3>
+                  <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+                    ${state.mode === 'multi' ? 'Pilih Tim Anda untuk Bermain Bersamaan' : 'Tim & Daftar Anggota'}
+                  </h3>
                 </div>
                 ${state.mode === 'multi' && state.teams.length < 4 ? `
                   <button onclick="addTeam()" class="inline-flex items-center gap-1.5 text-xs font-extrabold text-sky-700 hover:bg-sky-100 bg-sky-50 px-3 py-1.5 rounded-xl border border-sky-200 transition">
@@ -938,55 +966,56 @@
               <div class="grid grid-cols-1 ${state.mode === 'multi' ? 'md:grid-cols-2' : ''} gap-4">
                 ${state.teams.map((t, tIdx) => {
                   const accent = teamAccents[tIdx % teamAccents.length];
+                  const isChosenTeam = selectedTeamIdx === tIdx;
                   return `
-                    <div class="p-4 rounded-2xl bg-white border-2 ${accent.border} shadow-sm flex flex-col justify-between">
+                    <div onclick="selectSetupActiveTeam(${tIdx})"
+                      class="p-4 rounded-2xl border-2 transition cursor-pointer flex flex-col justify-between ${
+                        isChosenTeam
+                          ? `${accent.border} ${accent.bg} shadow-md`
+                          : `bg-white ${accent.idleBorder} hover:border-slate-400`
+                      }">
                       <div>
                         <div class="flex items-center justify-between gap-2 mb-3">
-                          <div class="flex items-center gap-2 w-full">
+                          <div class="flex items-center gap-2">
                             <span class="px-2.5 py-1 rounded-lg ${accent.badgeBg} text-white font-extrabold flex-shrink-0" style="font-size: 10px;">
                               TIM ${tIdx + 1}
                             </span>
-                            <input type="text" value="${t.name}" onchange="updateTeamName(${tIdx}, this.value)"
-                              class="font-extrabold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-full focus:outline-none focus:border-sky-500"
-                              placeholder="Nama Tim" />
+                            <span class="font-extrabold text-sm sm:text-base text-slate-900">${t.name}</span>
                           </div>
-                          ${state.mode === 'multi' && state.teams.length > 2 ? `
-                            <button onclick="removeTeam(${tIdx})" title="Hapus Tim" class="p-2 text-rose-500 hover:bg-rose-50 rounded-xl flex-shrink-0 transition">
-                              <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
-                          ` : ''}
+
+                          <div class="flex items-center gap-1.5">
+                            <span class="px-2.5 py-1 rounded-full font-extrabold ${
+                              isChosenTeam ? 'bg-slate-900 text-teal-300' : 'bg-slate-100 text-slate-500'
+                            }" style="font-size: 10px;">
+                              ${isChosenTeam ? '✓ Tim Terpilih' : 'Klik Pilih'}
+                            </span>
+                          </div>
                         </div>
 
                         <div class="flex items-center justify-between mb-2">
-                          <span class="font-bold text-slate-500" style="font-size: 11px;">Daftar Anggota (${t.members.length} orang)</span>
-                          <span class="text-slate-400" style="font-size: 10px;">Min. 2 anggota</span>
+                          <span class="font-bold text-slate-600" style="font-size: 11px;">Anggota Tim (${t.members.length} orang):</span>
                         </div>
 
-                        <div class="flex flex-wrap gap-1.5 mb-3.5">
-                          ${t.members.map((m, mIdx) => `
+                        <div class="flex flex-wrap gap-1.5 mb-3">
+                          ${t.members.map(m => `
                             <span class="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-xl border text-xs font-bold ${accent.chipBg}">
                               <span class="w-5 h-5 rounded-lg ${accent.avatarBg} font-extrabold flex items-center justify-center flex-shrink-0" style="font-size: 10px;">
                                 ${m.charAt(0).toUpperCase()}
                               </span>
                               <span>${m}</span>
-                              ${t.members.length > 2 ? `
-                                <button onclick="removeMemberFromTeam(${tIdx}, ${mIdx})" title="Hapus ${m}" class="ml-0.5 opacity-60 hover:opacity-100 text-rose-600">
-                                  <i data-lucide="x" class="w-3 h-3"></i>
-                                </button>
-                              ` : ''}
                             </span>
                           `).join('')}
                         </div>
                       </div>
 
-                      <div class="flex gap-1.5 pt-2.5 border-t border-slate-100">
+                      <div onclick="event.stopPropagation()" class="flex gap-1.5 pt-2.5 border-t border-slate-200">
                         <input type="text" id="newMemberInput_${tIdx}"
                           value="${state.newMemberDrafts[tIdx] || ''}"
                           oninput="state.newMemberDrafts[${tIdx}] = this.value"
                           onkeydown="if(event.key==='Enter'){ event.preventDefault(); addMemberToTeam(${tIdx}); }"
-                          placeholder="Ketik nama anggota baru..."
-                          class="text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 w-full focus:outline-none focus:border-sky-500" />
-                        <button onclick="addMemberToTeam(${tIdx})" class="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
+                          placeholder="Tambah nama anggota ke Tim ${tIdx + 1}..."
+                          class="text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 w-full focus:outline-none focus:border-sky-500" />
+                        <button onclick="addMemberToTeam(${tIdx})" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
                           + Tambah
                         </button>
                       </div>
@@ -997,14 +1026,14 @@
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <button onclick="startGame()" class="sm:col-span-2 py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer">
+              <button onclick="startGameForTeam(${selectedTeamIdx})" class="sm:col-span-2 py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer">
                 <i data-lucide="rocket" class="w-5 h-5"></i>
-                <span>Mulai Kompetisi (Ronde 1 → 2 → 3)</span>
+                <span>Mulai Bermain: ${selectedTeam.name} (Tim ${selectedTeamIdx + 1})</span>
               </button>
 
-              <button onclick="openDashboardScreen(0)" class="py-4 rounded-2xl border-2 border-slate-900 bg-white hover:bg-slate-50 text-slate-900 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition">
+              <button onclick="openDashboardScreen(${selectedTeamIdx})" class="py-4 rounded-2xl border-2 border-slate-900 bg-white hover:bg-slate-50 text-slate-900 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition">
                 <i data-lucide="layout-dashboard" class="w-4 h-4 text-sky-600"></i>
-                <span>Pilih Tim di Dashboard</span>
+                <span>Menu Dashboard</span>
               </button>
             </div>
           </div>
@@ -1016,6 +1045,7 @@
       state.mode = mode;
       state.teams = loadLocalTeams(mode);
       state.newMemberDrafts = {};
+      state.activeTeamIdx = 0;
       state.dashboardCompetingTeamIdx = 0;
       state.selectedPrivateTeamIdx = 0;
       state.selectedPrivateMemberName = null;
@@ -1023,70 +1053,82 @@
       await syncTeamsFromSupabase(mode);
     }
 
-    function addTeam() {
+    function addTeam(customName = '') {
       if (state.teams.length >= 4) return;
       const n = state.teams.length + 1;
-      state.teams.push(createBlankTeam(Date.now(), `Tim Yankes ${n}`, [`Anggota ${n}A`, `Anggota ${n}B`]));
-      persistTeamsConfig();
+      const teamTitle = customName.trim() || `Tim Yankes ${n}`;
+      state.teams.push(createBlankTeam(Date.now(), teamTitle, [`Anggota ${n}A`, `Anggota ${n}B`]));
+      persistTeamsConfig(true);
       render();
+      if (state.adminLoggedIn) renderAdminBody();
     }
 
     function removeTeam(idx) {
+      if (state.teams.length <= 1) return;
       state.teams.splice(idx, 1);
-      if (state.dashboardCompetingTeamIdx >= state.teams.length) {
-        state.dashboardCompetingTeamIdx = 0;
-      }
-      persistTeamsConfig();
+      if (state.activeTeamIdx >= state.teams.length) state.activeTeamIdx = 0;
+      if (state.dashboardCompetingTeamIdx >= state.teams.length) state.dashboardCompetingTeamIdx = 0;
+      persistTeamsConfig(true);
       render();
+      if (state.adminLoggedIn) renderAdminBody();
     }
 
     function updateTeamName(idx, val) {
       state.teams[idx].name = val.trim() || `Tim ${idx + 1}`;
-      persistTeamsConfig();
+      persistTeamsConfig(true);
+      render();
     }
 
-    function addMemberToTeam(tIdx) {
-      const inputEl = document.getElementById(`newMemberInput_${tIdx}`);
-      const rawName = (inputEl ? inputEl.value : state.newMemberDrafts[tIdx] || '').trim();
+    function addMemberToTeam(tIdx, fromAdmin = false) {
+      const inputId = fromAdmin ? `adminNewMemberInput_${tIdx}` : `newMemberInput_${tIdx}`;
+      const draftObj = fromAdmin ? state.adminMemberDrafts : state.newMemberDrafts;
+      const inputEl = document.getElementById(inputId);
+      const rawName = (inputEl ? inputEl.value : draftObj[tIdx] || '').trim();
       if (!rawName) return;
       if (!state.teams[tIdx].members.includes(rawName)) {
         state.teams[tIdx].members.push(rawName);
       }
-      state.newMemberDrafts[tIdx] = '';
-      persistTeamsConfig();
+      draftObj[tIdx] = '';
+      persistTeamsConfig(fromAdmin);
       render();
+      if (state.adminLoggedIn) renderAdminBody();
     }
 
-    function removeMemberFromTeam(tIdx, mIdx) {
-      if (state.teams[tIdx].members.length <= 2) return;
+    function removeMemberFromTeam(tIdx, mIdx, fromAdmin = false) {
+      if (state.teams[tIdx].members.length <= 1) return;
       state.teams[tIdx].members.splice(mIdx, 1);
-      persistTeamsConfig();
+      persistTeamsConfig(fromAdmin);
       render();
+      if (state.adminLoggedIn) renderAdminBody();
     }
 
-    function startGame() {
+    // Mulai bermain langsung untuk tim yang dipilih (Tim 1 atau Tim 2 bisa jalan bersamaan)
+    function startGameForTeam(teamIdx = 0) {
       initAudio();
       persistTeamsConfig();
       playSuccess();
-      state.teams.forEach(t => {
-        t.score = 0;
-        t.r1Harmony = 0;
-        t.r1Points = 0;
-        t.r1Details = [];
-        t.r1PlayerSubmissions = {};
-        t.r2Words = 0;
-        t.r2Points = 0;
-        t.r2Speaker = '-';
-        t.r2Completed = false;
-        t.r2PlayerSubmissions = {};
-        t.r3Score = 0;
-        t.r3Details = [];
-        t.r3Completed = false;
-        t.r3PlayerSubmissions = {};
-        t.completedPlayers = {};
-      });
-      state.activeTeamIdx = 0;
-      state.dashboardCompetingTeamIdx = 0;
+      const targetIdx = state.teams[teamIdx] ? teamIdx : 0;
+      const targetTeam = state.teams[targetIdx];
+
+      // Reset skor tim yang baru mulai bermain ini tanpa mengganggu tim lain
+      targetTeam.score = 0;
+      targetTeam.r1Harmony = 0;
+      targetTeam.r1Points = 0;
+      targetTeam.r1Details = [];
+      targetTeam.r1PlayerSubmissions = {};
+      targetTeam.r2Words = 0;
+      targetTeam.r2Points = 0;
+      targetTeam.r2Speaker = '-';
+      targetTeam.r2Completed = false;
+      targetTeam.r2PlayerSubmissions = {};
+      targetTeam.r3Score = 0;
+      targetTeam.r3Details = [];
+      targetTeam.r3Completed = false;
+      targetTeam.r3PlayerSubmissions = {};
+      targetTeam.completedPlayers = {};
+
+      state.activeTeamIdx = targetIdx;
+      state.dashboardCompetingTeamIdx = targetIdx;
       state.currentPlayerName = null;
       state.r1SelectedMember = null;
       state.r1PlayerQIdx = 0;
@@ -1094,7 +1136,7 @@
       state.r1LastSelectedOpt = null;
       state.r1PlayerDoneBanner = null;
       state.r1Timer = ROUND_DURATION_SECONDS;
-      state.selectedPrivateTeamIdx = 0;
+      state.selectedPrivateTeamIdx = targetIdx;
       state.selectedPrivateMemberName = null;
       state.sessionSavedOnce = false;
       state.saveStatus = 'idle';
@@ -1104,7 +1146,6 @@
 
     // ==========================================
     // RONDE 1: SATU FREKUENSI (30 DETIK / PERTANYAAN)
-    // Setelah 1 nama menyelesaikan Ronde 1 -> Lanjut ke Ronde 2
     // ==========================================
     function startR1QuestionTimer() {
       clearTimers();
@@ -1170,7 +1211,6 @@
         return;
       }
 
-      // 1 Nama selesai menjawab 5 pertanyaan Ronde 1 -> Simpan jawaban R1 & langsung lanjut ke Ronde 2!
       const finishedPlayer = state.r1SelectedMember;
       team.r1PlayerSubmissions[finishedPlayer] = [...state.r1TempAnswers];
       recalculateTeamRound1(team);
@@ -1181,7 +1221,7 @@
       state.r1TempAnswers = [];
       state.r1PlayerDoneBanner = finishedPlayer;
 
-      // Persiapkan Ronde 2 langsung untuk nama pemain ini
+      // Langsung lanjut ke Ronde 2 untuk nama ini
       state.r2SelectedSpeaker = finishedPlayer;
       state.r2Timer = ROUND_DURATION_SECONDS;
       state.r2Running = false;
@@ -1233,7 +1273,6 @@
       const totalQ = ROUND1_QUESTIONS.length;
       const completedMembers = team.members.filter(m => Boolean(team.completedPlayers[m]));
 
-      // TAMPILAN 1: Pilih nama anggota yang akan bermain (Ronde 1 -> Ronde 2 -> Ronde 3 -> Dashboard)
       if (!state.r1SelectedMember) {
         return `
           <div class="space-y-4">
@@ -1242,7 +1281,7 @@
             <div class="glass-card rounded-3xl p-5 sm:p-8">
               <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <span class="px-3 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-bold">
-                  Tim Bermain: ${team.name}
+                  Tim Bermain: ${team.name} (Tim ${state.activeTeamIdx + 1})
                 </span>
                 <span class="text-xs font-bold text-slate-500">
                   ${completedMembers.length} dari ${team.members.length} Anggota Tuntas 3 Ronde
@@ -1292,7 +1331,6 @@
         `;
       }
 
-      // TAMPILAN 2: Pemain aktif sedang menjawab Pertanyaan 1..5 (Timer 30 detik/soal)
       const question = ROUND1_QUESTIONS[state.r1PlayerQIdx];
       const hasNextQ = state.r1PlayerQIdx + 1 < totalQ;
       const progressPct = Math.round(((state.r1PlayerQIdx + 1) / totalQ) * 100);
@@ -1381,7 +1419,6 @@
 
     // ==========================================
     // RONDE 2: ESTAFET KATA KUNCI (30 DETIK)
-    // Setelah Ronde 2 selesai -> Lanjut ke Ronde 3
     // ==========================================
     function selectR2Speaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -1517,7 +1554,6 @@
           const team = state.teams[state.activeTeamIdx];
           const speaker = state.r2SelectedSpeaker;
 
-          // Simpan skor R2 per pemain & akumulasi tim
           const prevPlayerPts = (team.r2PlayerSubmissions[speaker] && team.r2PlayerSubmissions[speaker].points) || 0;
           const prevPlayerWords = (team.r2PlayerSubmissions[speaker] && team.r2PlayerSubmissions[speaker].words) || 0;
 
@@ -1552,7 +1588,6 @@
       render();
     }
 
-    // Lanjut dari Ronde 2 ke Ronde 3 untuk pemain yang sama
     function proceedToRound3ForPlayer() {
       clearTimers();
       const player = state.r2SelectedSpeaker || state.currentPlayerName;
@@ -1574,7 +1609,6 @@
 
     // ==========================================
     // RONDE 3: MISI DARURAT PELAYANAN (30 DETIK / KASUS)
-    // Setelah 3 kasus selesai -> Otomatis diarahkan ke Menu Dashboard
     // ==========================================
     function selectR3DecisionMaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -1727,7 +1761,6 @@
         return;
       }
 
-      // Semua 3 kasus di Ronde 3 selesai untuk pemain ini -> Simpan hasil & langsung arahkan ke Menu Dashboard!
       const team = state.teams[state.activeTeamIdx];
       const finishedPlayer = state.r3SelectedDecisionMaker || state.currentPlayerName;
       const finishedTeamIdx = state.activeTeamIdx;
@@ -1758,8 +1791,13 @@
         confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
       }
 
-      // Langsung arahkan ke Menu Dashboard dengan nama pemain yang baru selesai terpilih
       await openDashboardScreen(finishedTeamIdx, finishedPlayer);
+
+      // Jika seluruh anggota tim ini telah menuntaskan 3 ronde, simpan rekap tim ini ke Supabase
+      const allTeamMembersCompleted = team.members.every(m => Boolean(team.completedPlayers[m]));
+      if (allTeamMembersCompleted) {
+        await saveTeamSessionToDatabase(team);
+      }
     }
 
     function renderPrivateScoreBar(title, subtitle) {
@@ -1784,15 +1822,8 @@
     }
 
     // ==========================================
-    // MENU DASHBOARD (PILIH TIM BERLOMBA, PROGRES RONDE & NILAI PRIBADI)
+    // MENU DASHBOARD (PILIH TIM BERLOMBA & NILAI PRIBADI)
     // ==========================================
-    function selectPrivateTeam(idx) {
-      state.selectedPrivateTeamIdx = idx;
-      state.dashboardCompetingTeamIdx = idx;
-      state.selectedPrivateMemberName = null;
-      render();
-    }
-
     function selectPrivateMember(name) {
       state.selectedPrivateMemberName = name;
       render();
@@ -1843,7 +1874,7 @@
 
       let syncBanner = '';
       if (state.saveStatus === 'saving') {
-        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-bold mb-3"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Menyimpan hasil ke Supabase...</div>`;
+        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-bold mb-3"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Menyimpan hasil tim ke Supabase...</div>`;
       } else if (state.saveStatus === 'saved') {
         syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3"><i data-lucide="cloud-check" class="w-3.5 h-3.5"></i> Tersimpan ke Database Supabase</div>`;
       } else {
@@ -1865,7 +1896,7 @@
                 <p class="text-slate-500 mt-0.5" style="font-size: 11px;">Pilih tim di bawah ini, lalu mulai rangkaian <strong>Ronde 1 → Ronde 2 → Ronde 3</strong> untuk peserta berikutnya.</p>
               </div>
               <button onclick="goHome()" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
-                Atur Tim &amp; Anggota
+                ← Pilih Tim Awal
               </button>
             </div>
 
@@ -2030,7 +2061,7 @@
             `}
 
             <div class="flex flex-wrap justify-center gap-3">
-              <button onclick="openAdminModal()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
+              <button onclick="openAdminModal('recap')" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
                 <i data-lucide="bar-chart-3" class="w-4 h-4 text-teal-400"></i>
                 <span>Lihat Rekapitulasi Admin</span>
               </button>
@@ -2041,12 +2072,17 @@
     }
 
     // ==========================================
-    // 5. ADMIN DASHBOARD (SUPABASE CLOUD) & EXPORT CSV
+    // 5. ADMIN DASHBOARD (KELOLA TIM/ANGGOTA & REKAP SUPABASE)
     // ==========================================
-    async function openAdminModal() {
+    async function openAdminModal(initialTab = 'recap') {
+      state.adminTab = initialTab;
       document.getElementById('adminModal').classList.remove('hidden');
       if (state.adminLoggedIn) {
-        await refreshAdminData();
+        if (initialTab === 'recap') {
+          await refreshAdminData();
+        } else {
+          renderAdminBody();
+        }
       } else {
         renderAdminBody();
       }
@@ -2054,6 +2090,15 @@
 
     function closeAdminModal() {
       document.getElementById('adminModal').classList.add('hidden');
+    }
+
+    async function switchAdminTab(tabName) {
+      state.adminTab = tabName;
+      if (tabName === 'recap') {
+        await refreshAdminData();
+      } else {
+        renderAdminBody();
+      }
     }
 
     async function refreshAdminData() {
@@ -2069,6 +2114,15 @@
       renderAdminBody();
     }
 
+    function handleAdminCreateTeam() {
+      const input = document.getElementById('adminNewTeamInput');
+      const nameVal = (input ? input.value : state.adminNewTeamName || '').trim();
+      if (state.teams.length >= 4) return;
+      addTeam(nameVal);
+      state.adminNewTeamName = '';
+      renderAdminBody();
+    }
+
     function renderAdminBody() {
       const body = document.getElementById('adminModalBody');
       if (!state.adminLoggedIn) {
@@ -2078,13 +2132,13 @@
               <i data-lucide="lock" class="w-7 h-7"></i>
             </div>
             <h3 class="text-lg font-extrabold text-slate-900 mb-1">Verifikasi Akses Admin</h3>
-            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk melihat rekapitulasi cloud dari Supabase (PIN default: <strong>1234</strong>).</p>
+            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk mengelola tim/anggota &amp; melihat rekapitulasi Supabase (PIN default: <strong>1234</strong>).</p>
             <input id="adminPinInput" type="password" inputmode="numeric" maxlength="8" placeholder="••••"
               onkeydown="if(event.key==='Enter') verifyAdminPin()"
               class="w-full text-center text-xl font-black border-2 border-slate-200 rounded-xl py-3 mb-3 focus:outline-none focus:border-sky-600" style="letter-spacing: 0.5em;" />
             <p id="adminPinError" class="text-xs text-rose-600 font-semibold mb-3 hidden">PIN salah. Silakan coba lagi.</p>
             <button onclick="verifyAdminPin()" class="w-full py-3.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm">
-              Masuk Dashboard Admin
+              Masuk Panel Admin
             </button>
           </div>
         `;
@@ -2092,11 +2146,167 @@
         return;
       }
 
+      // Navigasi Tab Admin (Rekapitulasi vs Kelola Tim & Anggota)
+      const adminNavTabs = `
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-slate-200">
+          <div class="flex items-center gap-2">
+            <button onclick="switchAdminTab('recap')"
+              class="px-4 py-2.5 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition ${
+                state.adminTab === 'recap'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }">
+              <i data-lucide="bar-chart-3" class="w-4 h-4 ${state.adminTab === 'recap' ? 'text-teal-400' : ''}"></i>
+              <span>Rekapitulasi Sesi &amp; Nilai</span>
+            </button>
+
+            <button onclick="switchAdminTab('teams')"
+              class="px-4 py-2.5 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition ${
+                state.adminTab === 'teams'
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200'
+              }">
+              <i data-lucide="users" class="w-4 h-4"></i>
+              <span>Kelola Tim &amp; Anggota (${state.teams.length} Tim)</span>
+            </button>
+          </div>
+
+          <button onclick="adminLogout()" class="text-xs font-bold text-slate-500 hover:text-rose-600 px-2 py-1">
+            Keluar Admin
+          </button>
+        </div>
+      `;
+
+      // TAB 2: KELOLA TIM & ANGGOTA DI MENU ADMIN
+      if (state.adminTab === 'teams') {
+        const teamAccents = [
+          { border: 'border-sky-200', badgeBg: 'bg-sky-600', chipBg: 'bg-sky-50 border-sky-200 text-sky-900', avatarBg: 'bg-sky-600 text-white' },
+          { border: 'border-teal-200', badgeBg: 'bg-teal-600', chipBg: 'bg-teal-50 border-teal-200 text-teal-950', avatarBg: 'bg-teal-600 text-white' },
+          { border: 'border-indigo-200', badgeBg: 'bg-indigo-600', chipBg: 'bg-indigo-50 border-indigo-200 text-indigo-950', avatarBg: 'bg-indigo-600 text-white' },
+          { border: 'border-amber-200', badgeBg: 'bg-amber-500', chipBg: 'bg-amber-50 border-amber-200 text-amber-900', avatarBg: 'bg-amber-500 text-white' }
+        ];
+
+        body.innerHTML = `
+          <div>
+            ${adminNavTabs}
+
+            ${state.adminTeamSaveMsg ? `
+              <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold mb-4 flex items-center gap-2">
+                <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600"></i>
+                <span>${state.adminTeamSaveMsg}</span>
+              </div>
+            ` : ''}
+
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 mb-5">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div>
+                  <h4 class="font-extrabold text-sm text-slate-900">Tambah Tim Baru (Maks. 4 Tim)</h4>
+                  <p class="text-slate-500" style="font-size: 11px;">Perubahan tim &amp; nama anggota otomatis tersinkron ke Supabase dan halaman Pilih Tim peserta.</p>
+                </div>
+                <span class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700">
+                  Total: ${state.teams.length}/4 Tim
+                </span>
+              </div>
+
+              ${state.teams.length < 4 ? `
+                <div class="flex flex-col sm:flex-row gap-2">
+                  <input type="text" id="adminNewTeamInput"
+                    value="${state.adminNewTeamName}"
+                    oninput="state.adminNewTeamName = this.value"
+                    onkeydown="if(event.key==='Enter'){ event.preventDefault(); handleAdminCreateTeam(); }"
+                    placeholder="Contoh: Tim 3 - Pelayanan Rujukan..."
+                    class="text-xs sm:text-sm font-semibold text-slate-800 bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 w-full focus:outline-none focus:border-sky-600" />
+                  <button onclick="handleAdminCreateTeam()" class="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1.5 flex-shrink-0 transition">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                    <span>Tambah Tim Baru</span>
+                  </button>
+                </div>
+              ` : `
+                <p class="text-xs font-semibold text-amber-700">Jumlah maksimal 4 tim sudah tercapai.</p>
+              `}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              ${state.teams.map((t, tIdx) => {
+                const accent = teamAccents[tIdx % teamAccents.length];
+                return `
+                  <div class="p-4 rounded-2xl bg-white border-2 ${accent.border} shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div class="flex items-center justify-between gap-2 mb-3">
+                        <div class="flex items-center gap-2 w-full">
+                          <span class="px-2.5 py-1 rounded-lg ${accent.badgeBg} text-white font-extrabold flex-shrink-0" style="font-size: 10px;">
+                            TIM ${tIdx + 1}
+                          </span>
+                          <input type="text" value="${t.name}" onchange="updateTeamName(${tIdx}, this.value)"
+                            class="font-extrabold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-full focus:outline-none focus:border-sky-500"
+                            placeholder="Nama Tim" />
+                        </div>
+                        ${state.teams.length > 1 ? `
+                          <button onclick="removeTeam(${tIdx})" title="Hapus Tim" class="p-2 text-rose-500 hover:bg-rose-50 rounded-xl flex-shrink-0 transition">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                          </button>
+                        ` : ''}
+                      </div>
+
+                      <p class="font-bold text-slate-500 mb-2" style="font-size: 11px;">
+                        Daftar Orang dalam ${t.name} (${t.members.length} orang):
+                      </p>
+
+                      <div class="flex flex-wrap gap-1.5 mb-3.5">
+                        ${t.members.map((m, mIdx) => `
+                          <span class="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-xl border text-xs font-bold ${accent.chipBg}">
+                            <span class="w-5 h-5 rounded-lg ${accent.avatarBg} font-extrabold flex items-center justify-center flex-shrink-0" style="font-size: 10px;">
+                              ${m.charAt(0).toUpperCase()}
+                            </span>
+                            <span>${m}</span>
+                            ${t.members.length > 1 ? `
+                              <button onclick="removeMemberFromTeam(${tIdx}, ${mIdx}, true)" title="Hapus ${m}" class="ml-0.5 opacity-60 hover:opacity-100 text-rose-600">
+                                <i data-lucide="x" class="w-3 h-3"></i>
+                              </button>
+                            ` : ''}
+                          </span>
+                        `).join('')}
+                      </div>
+                    </div>
+
+                    <div class="flex gap-1.5 pt-2.5 border-t border-slate-100">
+                      <input type="text" id="adminNewMemberInput_${tIdx}"
+                        value="${state.adminMemberDrafts[tIdx] || ''}"
+                        oninput="state.adminMemberDrafts[${tIdx}] = this.value"
+                        onkeydown="if(event.key==='Enter'){ event.preventDefault(); addMemberToTeam(${tIdx}, true); }"
+                        placeholder="Ketik nama anggota baru..."
+                        class="text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 w-full focus:outline-none focus:border-sky-500" />
+                      <button onclick="addMemberToTeam(${tIdx}, true)" class="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
+                        + Tambah Orang
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <span class="text-slate-400" style="font-size: 11px;">Tabel Konfigurasi: public.yankes_game_config</span>
+              <button onclick="persistTeamsConfig(true)" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center gap-1.5 shadow-sm">
+                <i data-lucide="cloud-upload" class="w-4 h-4"></i>
+                <span>Simpan Semua ke Cloud Supabase</span>
+              </button>
+            </div>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      // TAB 1: REKAPITULASI SESI & NILAI
       if (state.adminLoading) {
         body.innerHTML = `
-          <div class="py-16 text-center text-slate-500">
-            <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-sky-600 mx-auto mb-3"></i>
-            <p class="text-sm font-bold text-slate-700">Memuat data rekapitulasi dari Supabase...</p>
+          <div>
+            ${adminNavTabs}
+            <div class="py-16 text-center text-slate-500">
+              <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-sky-600 mx-auto mb-3"></i>
+              <p class="text-sm font-bold text-slate-700">Memuat data rekapitulasi dari Supabase...</p>
+            </div>
           </div>
         `;
         lucide.createIcons();
@@ -2116,6 +2326,8 @@
 
       body.innerHTML = `
         <div class="space-y-6">
+          ${adminNavTabs}
+
           <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl ${dbConnected ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'} text-xs">
             <div class="flex items-center gap-2 font-bold">
               <i data-lucide="${dbConnected ? 'cloud-check' : 'hard-drive'}" class="w-4 h-4"></i>
@@ -2273,11 +2485,6 @@
               </div>
             `}
           </div>
-
-          <div class="pt-3 border-t border-slate-100 flex justify-between items-center">
-            <span class="text-slate-400" style="font-size: 11px;">Database: public.yankes_game_sessions</span>
-            <button onclick="adminLogout()" class="text-xs font-bold text-slate-600 hover:text-slate-900">Keluar Mode Admin</button>
-          </div>
         </div>
       `;
       lucide.createIcons();
@@ -2288,7 +2495,11 @@
       if (val === ADMIN_PIN) {
         state.adminLoggedIn = true;
         playSuccess();
-        await refreshAdminData();
+        if (state.adminTab === 'recap') {
+          await refreshAdminData();
+        } else {
+          renderAdminBody();
+        }
       } else {
         playError();
         document.getElementById('adminPinError').classList.remove('hidden');
