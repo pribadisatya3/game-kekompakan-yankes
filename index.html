@@ -7,6 +7,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <!-- Supabase JS SDK v2 -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
     body {
@@ -66,6 +68,12 @@
 
       <!-- Tombol Kanan -->
       <div class="flex items-center gap-2 shrink-0">
+        <!-- Indikator Status Koneksi Supabase -->
+        <div id="dbStatusBadge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-600">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span>Mengecek Cloud...</span>
+        </div>
+
         <button id="soundToggleBtn" onclick="toggleSound()" title="Suara Efek" class="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition">
           <i id="soundIcon" data-lucide="volume-2" class="w-4 h-4"></i>
         </button>
@@ -85,10 +93,10 @@
     <div class="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
       <div class="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
         <div class="flex items-center gap-2.5">
-          <i data-lucide="bar-chart-3" class="w-5 h-5 text-teal-400"></i>
+          <i data-lucide="database" class="w-5 h-5 text-teal-400"></i>
           <div>
-            <h2 class="font-bold text-base leading-tight">Dashboard Admin — Rekapitulasi Seluruh Peserta</h2>
-            <p class="text-[11px] text-slate-400">Rekap lengkap per tim, peran pemain tiap ronde, dan detail seluruh pertanyaan</p>
+            <h2 class="font-bold text-base leading-tight">Dashboard Admin — Database Supabase</h2>
+            <p class="text-[11px] text-slate-400">Rekapitulasi cloud seluruh peserta, peran pemain, dan rincian jawaban</p>
           </div>
         </div>
         <button onclick="closeAdminModal()" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition">
@@ -100,6 +108,36 @@
   </div>
 
   <script>
+    // ==========================================
+    // 0. KONFIGURASI SUPABASE (GANTI DENGAN MILIK ANDA)
+    // ==========================================
+    const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+    const isSupabaseConfigured =
+      SUPABASE_URL.startsWith('https://') &&
+      !SUPABASE_URL.includes('YOUR_PROJECT_ID') &&
+      SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
+
+    const supabaseClient = isSupabaseConfigured
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null;
+
+    let dbConnected = false;
+
+    function updateDbStatusBadge(connected, customText = '') {
+      dbConnected = connected;
+      const el = document.getElementById('dbStatusBadge');
+      if (!el) return;
+      if (connected) {
+        el.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-[11px] font-bold text-emerald-800';
+        el.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span><span>${customText || 'Supabase Terhubung'}</span>`;
+      } else {
+        el.className = 'hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-[11px] font-bold text-amber-800';
+        el.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>${customText || 'Mode Lokal (Isi Key Supabase)'}</span>`;
+      }
+    }
+
     // ==========================================
     // 1. AUDIO ENGINE (WEB AUDIO API)
     // ==========================================
@@ -231,7 +269,7 @@
     ];
 
     // ==========================================
-    // 3. STATE MANAGEMENT & LOCAL STORAGE
+    // 3. STATE MANAGEMENT & SUPABASE + LOCAL STORAGE
     // ==========================================
     const STORAGE_KEY = 'yankes_badung_game_history_v4';
     const TEAMS_CONFIG_KEY = 'yankes_badung_teams_config_v1';
@@ -254,7 +292,7 @@
       };
     }
 
-    function loadSavedTeams(mode) {
+    function loadLocalTeams(mode) {
       try {
         const raw = JSON.parse(localStorage.getItem(TEAMS_CONFIG_KEY) || 'null');
         if (raw && raw[mode] && Array.isArray(raw[mode]) && raw[mode].length > 0) {
@@ -270,25 +308,65 @@
       ];
     }
 
-    function persistTeamsConfig() {
+    async function syncTeamsFromSupabase(mode) {
+      if (!supabaseClient) return;
+      try {
+        const { data, error } = await supabaseClient
+          .from('yankes_game_config')
+          .select('teams_data')
+          .eq('mode', mode)
+          .maybeSingle();
+
+        if (!error) {
+          updateDbStatusBadge(true);
+          if (data && Array.isArray(data.teams_data) && data.teams_data.length > 0) {
+            state.teams = data.teams_data.map((t, idx) => createBlankTeam(t.id || idx + 1, t.name, [...t.members]));
+            if (state.screen === 'setup') render();
+          }
+        } else {
+          updateDbStatusBadge(false, 'Cek Tabel Supabase');
+        }
+      } catch (e) {
+        updateDbStatusBadge(false, 'Offline (Lokal)');
+      }
+    }
+
+    async function persistTeamsConfig() {
+      const payload = state.teams.map(t => ({
+        id: t.id,
+        name: t.name,
+        members: [...t.members]
+      }));
+
+      // Simpan cache lokal
       try {
         const existing = JSON.parse(localStorage.getItem(TEAMS_CONFIG_KEY) || '{}');
-        existing[state.mode] = state.teams.map(t => ({
-          id: t.id,
-          name: t.name,
-          members: [...t.members]
-        }));
+        existing[state.mode] = payload;
         localStorage.setItem(TEAMS_CONFIG_KEY, JSON.stringify(existing));
       } catch (e) {}
+
+      // Simpan ke Supabase
+      if (supabaseClient) {
+        try {
+          const { error } = await supabaseClient
+            .from('yankes_game_config')
+            .upsert({
+              mode: state.mode,
+              teams_data: payload,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'mode' });
+          if (!error) updateDbStatusBadge(true);
+        } catch (e) {}
+      }
     }
 
     let state = {
       screen: 'setup', // setup, round1, round2, round3, summary
       mode: 'multi',
-      teams: loadSavedTeams('multi'),
+      teams: loadLocalTeams('multi'),
       newMemberDrafts: {},
       activeTeamIdx: 0,
-      // Round 1 state (5 pertanyaan beruntun per tim)
+      // Round 1 state
       r1QIdx: 0,
       r1SelectedMember: null,
       r1Answers: [],
@@ -301,7 +379,7 @@
       r2Running: false,
       r2SessionScore: 0,
       r2CorrectCount: 0,
-      // Round 3 state (3 kasus beruntun per tim)
+      // Round 3 state
       r3SelectedDecisionMaker: null,
       r3Idx: 0,
       r3Timer: 15,
@@ -310,12 +388,15 @@
       // Private Result View State
       selectedPrivateTeamIdx: null,
       selectedPrivateMemberName: null,
+      saveStatus: 'idle', // idle | saving | saved | local_only
       // Admin state
       adminLoggedIn: false,
+      adminLoading: false,
+      adminHistoryCache: [],
       expandedSessionId: null
     };
 
-    function getHistory() {
+    function getLocalHistory() {
       try {
         return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       } catch (e) {
@@ -323,33 +404,95 @@
       }
     }
 
-    function saveSessionToHistory() {
-      const history = getHistory();
+    async function fetchHistoryFromSupabase() {
+      if (!supabaseClient) {
+        return getLocalHistory();
+      }
+      try {
+        const { data, error } = await supabaseClient
+          .from('yankes_game_sessions')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        updateDbStatusBadge(true);
+
+        const mapped = (data || []).map(row => ({
+          dbId: row.id,
+          id: row.session_code,
+          timestamp: row.timestamp_label,
+          mode: row.mode,
+          avgHarmony: row.avg_harmony,
+          teams: row.teams_data || []
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(mapped));
+        return mapped;
+      } catch (err) {
+        console.warn('Gagal memuat dari Supabase, memakai data lokal:', err);
+        return getLocalHistory();
+      }
+    }
+
+    async function saveSessionToDatabase() {
+      state.saveStatus = 'saving';
+      render();
+
       const totalHarmony = Math.round(
         state.teams.reduce((acc, t) => acc + t.r1Harmony, 0) / state.teams.length
       );
-      const record = {
-        id: 'SESI-' + Date.now().toString().slice(-6),
-        timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
-        mode: state.mode === 'single' ? '1 Tim Besar' : `${state.teams.length} Tim`,
+      const sessionCode = 'SESI-' + Date.now().toString().slice(-6);
+      const timestampLabel = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+      const modeLabel = state.mode === 'single' ? '1 Tim Besar' : `${state.teams.length} Tim`;
+      const teamsPayload = state.teams.map(t => ({
+        name: t.name,
+        members: [...t.members],
+        score: t.score,
+        r1Harmony: t.r1Harmony,
+        r1Points: t.r1Points,
+        r1Details: t.r1Details || [],
+        r2Words: t.r2Words,
+        r2Points: t.r2Points,
+        r2Speaker: t.r2Speaker || '-',
+        r3Score: t.r3Score,
+        r3Details: t.r3Details || [],
+        predicate: getPredicate(t.score).title
+      }));
+
+      // Simpan ke localStorage sebagai cadangan
+      const localHistory = getLocalHistory();
+      localHistory.unshift({
+        id: sessionCode,
+        timestamp: timestampLabel,
+        mode: modeLabel,
         avgHarmony: totalHarmony,
-        teams: state.teams.map(t => ({
-          name: t.name,
-          members: [...t.members],
-          score: t.score,
-          r1Harmony: t.r1Harmony,
-          r1Points: t.r1Points,
-          r1Details: t.r1Details || [],
-          r2Words: t.r2Words,
-          r2Points: t.r2Points,
-          r2Speaker: t.r2Speaker || '-',
-          r3Score: t.r3Score,
-          r3Details: t.r3Details || [],
-          predicate: getPredicate(t.score).title
-        }))
-      };
-      history.unshift(record);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        teams: teamsPayload
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(localHistory));
+
+      // Simpan ke Supabase
+      if (supabaseClient) {
+        try {
+          const { error } = await supabaseClient
+            .from('yankes_game_sessions')
+            .insert({
+              session_code: sessionCode,
+              timestamp_label: timestampLabel,
+              mode: modeLabel,
+              avg_harmony: totalHarmony,
+              teams_data: teamsPayload
+            });
+
+          if (error) throw error;
+          updateDbStatusBadge(true);
+          state.saveStatus = 'saved';
+        } catch (err) {
+          console.error('Supabase insert error:', err);
+          state.saveStatus = 'local_only';
+        }
+      } else {
+        state.saveStatus = 'local_only';
+      }
+      render();
     }
 
     function getPredicate(score) {
@@ -390,13 +533,13 @@
         <div class="glass-card rounded-3xl p-6 sm:p-8">
           <div class="text-center max-w-2xl mx-auto mb-8">
             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-700 text-xs font-bold mb-3">
-              <i data-lucide="user-check" class="w-3.5 h-3.5"></i> Pilih Tim &amp; Nama Pemain Mandiri
+              <i data-lucide="cloud" class="w-3.5 h-3.5"></i> Terintegrasi Cloud Database Supabase
             </span>
             <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Uji Kekompakan Tim Yankes
             </h2>
             <p class="text-sm text-slate-600 mt-2">
-              Atur tim dan daftar anggotanya di bawah. Setelah pemain mengisi jawaban, permainan langsung berlanjut ke pertanyaan berikutnya hingga seluruh ronde selesai.
+              Atur tim dan daftar anggotanya di bawah. Setelah pemain mengisi jawaban, permainan langsung berlanjut ke pertanyaan berikutnya dan hasilnya otomatis tersimpan ke Supabase.
             </p>
           </div>
 
@@ -463,7 +606,6 @@
                     </div>
                   </div>
 
-                  <!-- Input Tambah Anggota Satuan -->
                   <div class="flex gap-1.5 pt-2 border-t border-slate-100">
                     <input type="text" id="newMemberInput_${tIdx}"
                       value="${state.newMemberDrafts[tIdx] || ''}"
@@ -488,11 +630,12 @@
       `;
     }
 
-    function setMode(mode) {
+    async function setMode(mode) {
       state.mode = mode;
-      state.teams = loadSavedTeams(mode);
+      state.teams = loadLocalTeams(mode);
       state.newMemberDrafts = {};
       render();
+      await syncTeamsFromSupabase(mode);
     }
 
     function addTeam() {
@@ -555,12 +698,13 @@
       state.r1Revealed = false;
       state.selectedPrivateTeamIdx = null;
       state.selectedPrivateMemberName = null;
+      state.saveStatus = 'idle';
       state.screen = 'round1';
       render();
     }
 
     // ==========================================
-    // RONDE 1: SATU FREKUENSI (LANJUT KE PERTANYAAN BERIKUTNYA HINGGA SELESAI)
+    // RONDE 1: SATU FREKUENSI
     // ==========================================
     function selectR1Member(memberName) {
       if (state.r1Answers.some(a => a.member === memberName)) return;
@@ -594,7 +738,6 @@
         harmonyPct = Math.round((maxCount / state.r1Answers.length) * 100);
       }
 
-      // Label tombol lanjut yang jelas
       let nextBtnLabel = 'Lanjut ke Ronde 2: Estafet Kata Kunci';
       if (hasMoreQuestions) {
         nextBtnLabel = `Lanjut ke Pertanyaan Berikutnya (${state.r1QIdx + 2} dari ${totalQ})`;
@@ -621,7 +764,6 @@
             </h3>
 
             ${state.r1Revealed ? `
-              <!-- Hasil Pertanyaan Ini & Tombol Lanjut ke Pertanyaan Berikutnya -->
               <div class="p-5 rounded-2xl bg-gradient-to-br from-sky-600 to-teal-600 text-white mb-6 text-center">
                 <p class="text-xs uppercase tracking-wider font-bold text-sky-100">Skor Kekompakan Pertanyaan ${state.r1QIdx + 1} — ${team.name}</p>
                 <div class="text-4xl sm:text-5xl font-black my-1">${harmonyPct}%</div>
@@ -634,7 +776,6 @@
               </button>
 
             ` : !state.r1SelectedMember ? `
-              <!-- Langkah 1: Pemain memilih namanya sendiri dari anggota tim -->
               <div class="p-5 rounded-2xl bg-sky-50/80 border border-sky-200 mb-2">
                 <p class="text-xs font-bold uppercase tracking-wider text-sky-800 mb-1">
                   Pilih Nama Anda (${team.name}):
@@ -671,7 +812,6 @@
               </div>
 
             ` : `
-              <!-- Langkah 2: Pemain yang dipilih menjawab secara rahasia -->
               <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200 mb-6 flex items-center justify-between gap-2">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-full bg-amber-500 text-white font-bold flex items-center justify-center">
@@ -748,15 +888,12 @@
       state.r1SelectedMember = null;
       state.r1Revealed = false;
 
-      // 1. Jika masih ada pertanyaan berikutnya untuk tim ini, lanjut ke pertanyaan berikutnya
       if (state.r1QIdx + 1 < ROUND1_QUESTIONS.length) {
         state.r1QIdx++;
       } else if (state.mode === 'multi' && state.activeTeamIdx + 1 < state.teams.length) {
-        // 2. Jika semua pertanyaan tim ini selesai, pindah ke tim berikutnya mulai dari pertanyaan 1
         state.activeTeamIdx++;
         state.r1QIdx = 0;
       } else {
-        // 3. Semua tim selesai Ronde 1 -> masuk ke Ronde 2
         state.activeTeamIdx = 0;
         state.r2SelectedSpeaker = null;
         state.r2Timer = 60;
@@ -769,7 +906,7 @@
     }
 
     // ==========================================
-    // RONDE 2: ESTAFET KATA KUNCI (PEMAIN PILIH NAMANYA SENDIRI SESUAI TIM)
+    // RONDE 2: ESTAFET KATA KUNCI
     // ==========================================
     function selectR2Speaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -921,7 +1058,7 @@
     }
 
     // ==========================================
-    // RONDE 3: MISI DARURAT PELAYANAN (LANJUT KE PERTANYAAN BERIKUTNYA HINGGA SELESAI)
+    // RONDE 3: MISI DARURAT PELAYANAN
     // ==========================================
     function selectR3DecisionMaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -937,7 +1074,7 @@
       const hasMoreScenarios = state.r3Idx + 1 < totalScenarios;
       const hasMoreTeams = state.activeTeamIdx + 1 < state.teams.length;
 
-      let nextBtnLabel = 'Selesai & Cek Nilai Saya';
+      let nextBtnLabel = 'Selesai & Simpan ke Supabase';
       if (hasMoreScenarios) {
         nextBtnLabel = `Lanjut ke Pertanyaan Berikutnya (Kasus ${state.r3Idx + 2} dari ${totalScenarios})`;
       } else if (hasMoreTeams) {
@@ -1064,21 +1201,19 @@
       render();
     }
 
-    function nextR3Step() {
-      // 1. Jika masih ada studi kasus berikutnya untuk tim ini, lanjut ke pertanyaan berikutnya
+    async function nextR3Step() {
       if (state.r3Idx + 1 < ROUND3_SCENARIOS.length) {
         state.r3Idx++;
         state.r3SelectedOption = null;
-        state.r3SelectedDecisionMaker = null; // beri kesempatan anggota memilih namanya lagi untuk kasus berikutnya
+        state.r3SelectedDecisionMaker = null;
+        render();
       } else if (state.activeTeamIdx + 1 < state.teams.length) {
-        // 2. Pindah ke tim berikutnya mulai dari kasus 1
         state.activeTeamIdx++;
         state.r3Idx = 0;
         state.r3SelectedOption = null;
         state.r3SelectedDecisionMaker = null;
+        render();
       } else {
-        // 3. Semua tim selesai seluruh pertanyaan -> simpan & tampilkan hasil privat
-        saveSessionToHistory();
         state.selectedPrivateTeamIdx = null;
         state.selectedPrivateMemberName = null;
         state.screen = 'summary';
@@ -1086,11 +1221,11 @@
         if (typeof confetti === 'function') {
           confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
         }
+        await saveSessionToDatabase();
       }
-      render();
     }
 
-    // --- PRIVATE SCORE BAR (HANYA MENAMPILKAN SKOR TIM AKTIF) ---
+    // --- PRIVATE SCORE BAR ---
     function renderPrivateScoreBar(title, subtitle) {
       const activeTeam = state.teams[state.activeTeamIdx];
       return `
@@ -1112,7 +1247,7 @@
       `;
     }
 
-    // --- SCREEN 5: HASIL PRIVAT PESERTA (PILIH TIM & NAMA SENDIRI) ---
+    // --- SCREEN 5: HASIL PRIVAT PESERTA ---
     function selectPrivateTeam(idx) {
       state.selectedPrivateTeamIdx = idx;
       state.selectedPrivateMemberName = null;
@@ -1155,11 +1290,18 @@
         : 0;
       const pred = getPredicate(personalTotalScore);
 
+      let syncBanner = '';
+      if (state.saveStatus === 'saving') {
+        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 text-sky-800 text-xs font-bold mb-3"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Menyimpan hasil ke Supabase...</div>`;
+      } else if (state.saveStatus === 'saved') {
+        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3"><i data-lucide="cloud-check" class="w-3.5 h-3.5"></i> Tersimpan ke Database Supabase</div>`;
+      } else {
+        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Hasil Privat Pemain</div>`;
+      }
+
       return `
         <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
-          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3">
-            <i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Hasil Privat Pemain
-          </div>
+          ${syncBanner}
           <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">Cek Nilai &amp; Hasil Anda Sendiri</h2>
           <p class="text-sm text-slate-600 max-w-xl mx-auto mb-6">
             ${state.mode === 'multi'
@@ -1267,15 +1409,27 @@
     }
 
     // ==========================================
-    // 5. ADMIN DASHBOARD (SEMUA HASIL LENGKAP) & EXPORT CSV
+    // 5. ADMIN DASHBOARD (SUPABASE CLOUD) & EXPORT CSV
     // ==========================================
-    function openAdminModal() {
+    async function openAdminModal() {
       document.getElementById('adminModal').classList.remove('hidden');
-      renderAdminBody();
+      if (state.adminLoggedIn) {
+        await refreshAdminData();
+      } else {
+        renderAdminBody();
+      }
     }
 
     function closeAdminModal() {
       document.getElementById('adminModal').classList.add('hidden');
+    }
+
+    async function refreshAdminData() {
+      state.adminLoading = true;
+      renderAdminBody();
+      state.adminHistoryCache = await fetchHistoryFromSupabase();
+      state.adminLoading = false;
+      renderAdminBody();
     }
 
     function toggleSessionDetail(sessionId) {
@@ -1292,7 +1446,7 @@
               <i data-lucide="lock" class="w-7 h-7"></i>
             </div>
             <h3 class="text-lg font-extrabold text-slate-900 mb-1">Verifikasi Akses Admin</h3>
-            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk melihat rekapitulasi seluruh tim &amp; pemain (PIN default: <strong>1234</strong>).</p>
+            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk melihat rekapitulasi cloud dari Supabase (PIN default: <strong>1234</strong>).</p>
             <input id="adminPinInput" type="password" maxlength="8" placeholder="••••"
               onkeydown="if(event.key==='Enter') verifyAdminPin()"
               class="w-full text-center tracking-[0.5em] text-xl font-black border-2 border-slate-200 rounded-xl py-3 mb-3 focus:outline-none focus:border-sky-600" />
@@ -1306,7 +1460,18 @@
         return;
       }
 
-      const history = getHistory();
+      if (state.adminLoading) {
+        body.innerHTML = `
+          <div class="py-16 text-center text-slate-500">
+            <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-sky-600 mx-auto mb-3"></i>
+            <p class="text-sm font-bold text-slate-700">Memuat data rekapitulasi dari Supabase...</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      const history = state.adminHistoryCache;
       const totalSessions = history.length;
       const allTeams = history.flatMap(h => h.teams);
       const totalTeamsCount = allTeams.length;
@@ -1319,6 +1484,17 @@
 
       body.innerHTML = `
         <div class="space-y-6">
+          <!-- Banner Sumber Data -->
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl ${dbConnected ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'} text-xs">
+            <div class="flex items-center gap-2 font-bold">
+              <i data-lucide="${dbConnected ? 'cloud-check' : 'hard-drive'}" class="w-4 h-4"></i>
+              <span>${dbConnected ? 'Terhubung ke Supabase Cloud Database (Data Sinkron Lintas Perangkat)' : 'Menggunakan Penyimpanan Lokal (Isi SUPABASE_URL & SUPABASE_ANON_KEY di kode untuk sinkronisasi cloud)'}</span>
+            </div>
+            <button onclick="refreshAdminData()" class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 inline-flex items-center gap-1">
+              <i data-lucide="refresh-cw" class="w-3 h-3"></i> Segarkan
+            </button>
+          </div>
+
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
               <p class="text-[11px] font-semibold text-slate-500">Total Sesi Bermain</p>
@@ -1356,7 +1532,7 @@
 
             ${totalSessions === 0 ? `
               <div class="p-10 text-center rounded-2xl border border-dashed border-slate-300 text-slate-500 text-sm">
-                Belum ada riwayat permainan yang selesai. Selesaikan 1 sesi permainan maka seluruh hasilnya otomatis tercatat di sini.
+                Belum ada riwayat permainan yang tersimpan di database. Selesaikan 1 sesi permainan maka seluruh hasilnya otomatis tercatat di sini.
               </div>
             ` : `
               <div class="space-y-4">
@@ -1468,7 +1644,7 @@
           </div>
 
           <div class="pt-3 border-t border-slate-100 flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">Semua riwayat hasil tersimpan otomatis di browser perangkat ini.</span>
+            <span class="text-[11px] text-slate-400">Database: public.yankes_game_sessions</span>
             <button onclick="adminLogout()" class="text-xs font-bold text-slate-600 hover:text-slate-900">Keluar Mode Admin</button>
           </div>
         </div>
@@ -1476,12 +1652,12 @@
       lucide.createIcons();
     }
 
-    function verifyAdminPin() {
+    async function verifyAdminPin() {
       const val = document.getElementById('adminPinInput').value;
       if (val === ADMIN_PIN) {
         state.adminLoggedIn = true;
         playSuccess();
-        renderAdminBody();
+        await refreshAdminData();
       } else {
         playError();
         document.getElementById('adminPinError').classList.remove('hidden');
@@ -1493,15 +1669,23 @@
       renderAdminBody();
     }
 
-    function clearHistory() {
-      if (confirm('Hapus seluruh data riwayat kekompakan tim?')) {
-        localStorage.removeItem(STORAGE_KEY);
-        renderAdminBody();
+    async function clearHistory() {
+      if (!confirm('Hapus seluruh data riwayat kekompakan tim di Supabase & lokal?')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      if (supabaseClient) {
+        try {
+          await supabaseClient
+            .from('yankes_game_sessions')
+            .delete()
+            .neq('session_code', '');
+        } catch (e) {}
       }
+      state.adminHistoryCache = [];
+      renderAdminBody();
     }
 
     function exportHistoryCSV() {
-      const history = getHistory();
+      const history = state.adminHistoryCache;
       if (!history.length) return;
       const rows = [[
         'ID Sesi',
@@ -1546,14 +1730,19 @@
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `rekap_lengkap_kekompakan_yankes_${new Date().toISOString().slice(0,10)}.csv`);
+      link.setAttribute("download", `rekap_supabase_kekompakan_yankes_${new Date().toISOString().slice(0,10)}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
 
-    // Initial render
+    // Inisialisasi awal & cek koneksi Supabase
     render();
+    if (isSupabaseConfigured) {
+      syncTeamsFromSupabase(state.mode);
+    } else {
+      updateDbStatusBadge(false);
+    }
   </script>
 </body>
 </html>
