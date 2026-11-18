@@ -113,6 +113,7 @@
     .hover\:bg-teal-700:hover { background-color: #0f766e; }
     .bg-teal-100 { background-color: #ccfbf1; }
     .bg-teal-50 { background-color: #f0fdfa; }
+    .hover\:bg-teal-50:hover { background-color: #f0fdfa; }
     .text-teal-950 { color: #042f2e; }
     .text-teal-800 { color: #115e59; }
     .text-teal-700 { color: #0f766e; }
@@ -122,6 +123,7 @@
     .border-teal-600 { border-color: #0d9488; }
     .border-teal-400 { border-color: #2dd4bf; }
     .border-teal-200 { border-color: #99f6e4; }
+    .hover\:border-teal-600:hover { border-color: #0d9488; }
     .hover\:border-teal-400:hover { border-color: #2dd4bf; }
 
     .bg-emerald-600 { background-color: #059669; }
@@ -269,7 +271,7 @@
 
   <script>
     // ==========================================
-    // 0. KONFIGURASI SUPABASE (GANTI ANON KEY ASLI DARI DASHBOARD SUPABASE)
+    // 0. KONFIGURASI SUPABASE
     // ==========================================
     const SUPABASE_URL = 'https://onhyzivslkftrcudrdtb.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uaHl6aXZzbGtmdHJjdWRyZHRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5OTI0OTgsImV4cCI6MjExMDU2ODQ5OH0.VSMsFBhcl4zfBoaNMWlFFPOcZhVF2cdtYTADeIpU5do';
@@ -385,19 +387,56 @@
       }
     ];
 
-    const ROUND2_WORDS = [
-      { word: "PUSKESMAS", tabu: ["Klinik", "Kecamatan", "Dokter", "Berobat", "Kesehatan"] },
-      { word: "AKREDITASI", tabu: ["Nilai", "Paripurna", "Survei", "Standar", "Mutu"] },
-      { word: "RUJUKAN", tabu: ["Rumah Sakit", "Surat", "Pasien", "Pindah", "BPJS"] },
-      { word: "SIPERKLIN", tabu: ["Klinik", "Izin", "Online", "Badung", "Rekomendasi"] },
-      { word: "VISITASI", tabu: ["Lapangan", "Cek", "Kunjungan", "Tim", "Lokasi"] },
-      { word: "MANGUSADA", tabu: ["RSD", "Kapal", "Rumah Sakit", "Badung", "Pemerintah"] },
-      { word: "REKAM MEDIS", tabu: ["Pasien", "Catatan", "Riwayat", "Elektronik", "Dokter"] },
-      { word: "APOTEK", tabu: ["Obat", "Resep", "Farmasi", "Beli", "Apoteker"] },
-      { word: "AMBULANS", tabu: ["Mobil", "Sirine", "Darurat", "Pasien", "Sirene"] },
-      { word: "LABORATORIUM", tabu: ["Darah", "Tes", "Cek", "Sampel", "Hasil"] },
-      { word: "SURVEI KEPUASAN", tabu: ["SKM", "Nilai", "Masyarakat", "Kuesioner", "Pelayanan"] },
-      { word: "IZIN OPERASIONAL", tabu: ["OSS", "Surat", "Buka", "Klinik", "Resmi"] }
+    // RONDE 2: KUIS KEBIASAAN & GAYA KERJA REKAN SETIM (OPSI OTOMATIS NAMA ANGGOTA TIM)
+    const ROUND2_TEAM_QUESTIONS = [
+      {
+        category: "Ketelitian Berkas",
+        q: "Siapa di tim ini yang paling jeli menemukan kekurangan halaman atau salah format pada berkas PDF perizinan?"
+      },
+      {
+        category: "Disiplin Waktu",
+        q: "Siapa rekan setim yang paling sering tiba lebih awal di kantor atau paling sigap stand-by sebelum apel pagi?"
+      },
+      {
+        category: "Jago Rute Lapangan",
+        q: "Kalau ada jadwal visitasi fasyankes dari Mengwi sampai Kuta Selatan, siapa yang paling hafal jalan pintas bebas macet?"
+      },
+      {
+        category: "Pencair Suasana",
+        q: "Saat suasana rapat atau kerjaan sedang tegang mengejar deadline, siapa yang paling sering melontarkan candaan pencair suasana?"
+      },
+      {
+        category: "Admin & Sistem Digital",
+        q: "Kalau ada kendala teknis pada aplikasi, spreadsheet, atau format surat dinas, siapa yang pertama kali dimintai tolong?"
+      },
+      {
+        category: "Komunikasi & Pelayanan",
+        q: "Siapa di tim ini yang paling sabar dan telaten menjelaskan prosedur layanan kepada pemohon di loket atau lewat telepon?"
+      },
+      {
+        category: "Kopi & Camilan Kantor",
+        q: "Siapa rekan setim yang paling sering berinisiatif mengajak ngopi atau menyiapkan camilan penyemangat di meja kerja?"
+      },
+      {
+        category: "Gerak Cepat (Sat-Set)",
+        q: "Begitu ada disposisi mendadak dari pimpinan, siapa yang paling cepat merespons dan langsung mengeksekusi tugasnya?"
+      },
+      {
+        category: "Dokumentasi & Arsip",
+        q: "Siapa di tim ini yang paling rapi menyimpan dokumentasi foto visitasi lapangan dan mengarsipkan laporan kegiatan?"
+      },
+      {
+        category: "Pengingat Jadwal",
+        q: "Siapa yang paling sering mengingatkan rekan satu tim soal jadwal rapat, batas waktu laporan, atau agenda besok pagi?"
+      },
+      {
+        category: "Andalan Konsumsi Lembur",
+        q: "Kalau tim harus lembur menyelesaikan rekapitulasi akhir bulan, siapa yang paling jago merekomendasikan kuliner enak?"
+      },
+      {
+        category: "Semangat Pantang Menyerah",
+        q: "Siapa di tim ini yang energinya selalu stabil dan tetap ceria meskipun jadwal kegiatan lapangan padat seharian?"
+      }
     ];
 
     const ROUND3_SCENARIOS = [
@@ -476,7 +515,6 @@
       ];
     }
 
-    // Gabungkan konfigurasi tim terbaru dari Supabase tanpa menghapus progres permainan lokal di HP
     function mergeCloudTeamsPreservingProgress(cloudTeamsData) {
       const existingById = new Map(state.teams.map(t => [String(t.id), t]));
       const existingByName = new Map(state.teams.map(t => [t.name.toLowerCase(), t]));
@@ -553,7 +591,6 @@
       }
     }
 
-    // Berlangganan perubahan realtime dari Supabase agar HP otomatis ter-update saat Admin menyimpan tim
     function initSupabaseRealtime() {
       if (!supabaseClient) return;
       try {
@@ -585,7 +622,6 @@
       } catch (e) {}
     }
 
-    // Otomatis sinkron saat HP membuka kembali tab browser / bangun dari sleep
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && isSupabaseConfigured) {
         syncTeamsFromSupabase(state.mode, false);
@@ -665,14 +701,16 @@
       r1PlayerDoneBanner: null,
       r1Timer: ROUND_DURATION_SECONDS,
       r1Interval: null,
-      // Round 2 (30 detik per giliran estafet kata)
+      // Round 2 (30 detik tebak kebiasaan & gaya kerja rekan setim)
       r2SelectedSpeaker: null,
       r2Timer: ROUND_DURATION_SECONDS,
       r2Interval: null,
       r2WordIdx: 0,
+      r2QuestionOrder: [],
       r2Running: false,
       r2SessionScore: 0,
       r2CorrectCount: 0,
+      r2AnswersLog: [],
       // Round 3 (30 detik per studi kasus)
       r3SelectedDecisionMaker: null,
       r3Idx: 0,
@@ -863,6 +901,7 @@
         state.r2Running = false;
         state.r2SessionScore = 0;
         state.r2CorrectCount = 0;
+        state.r2AnswersLog = [];
       } else if (roundScreen === 'round3') {
         state.r3SelectedDecisionMaker = null;
         state.r3Idx = 0;
@@ -881,7 +920,7 @@
     }
 
     // ==========================================
-    // 4. SCREEN RENDERERS (TANPA TOMBOL TAMBAH TIM DI DASHBOARD/SETUP)
+    // 4. SCREEN RENDERERS
     // ==========================================
     function selectSetupActiveTeam(tIdx) {
       if (!state.teams[tIdx]) return;
@@ -971,15 +1010,15 @@
                   <div class="flex items-center justify-between gap-2 mb-1">
                     <div class="flex items-center gap-2">
                       <div class="w-6 h-6 rounded-lg bg-teal-600 text-white flex items-center justify-center flex-shrink-0">
-                        <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                        <i data-lucide="user-search" class="w-3.5 h-3.5"></i>
                       </div>
                       <span class="font-extrabold text-xs text-white">Ronde 2</span>
                     </div>
                     <span class="px-2 py-0.5 rounded bg-teal-600 text-white font-bold" style="font-size: 10px;">30 Detik</span>
                   </div>
-                  <p class="font-bold text-xs text-white mb-0.5">Estafet Kata Kunci</p>
+                  <p class="font-bold text-xs text-white mb-0.5">Kenal Rekan Setim</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Tebak istilah layanan kesehatan 30 detik, lalu lanjut ke Ronde 3.
+                    Tebak kebiasaan &amp; gaya kerja teman satu tim selama 30 detik.
                   </p>
                 </div>
 
@@ -1053,7 +1092,7 @@
               </div>
             </div>
 
-            <!-- Langkah 2: Pilih Tim yang Akan Bermain (Hanya Tampil Daftar Tim & Anggota) -->
+            <!-- Langkah 2: Pilih Tim yang Akan Bermain -->
             <div class="mb-6">
               <div class="flex items-center gap-2 mb-3">
                 <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">2</span>
@@ -1299,6 +1338,7 @@
       state.r2Running = false;
       state.r2SessionScore = 0;
       state.r2CorrectCount = 0;
+      state.r2AnswersLog = [];
 
       playSuccess();
       state.screen = 'round2';
@@ -1490,7 +1530,7 @@
     }
 
     // ==========================================
-    // RONDE 2: ESTAFET KATA KUNCI (30 DETIK)
+    // RONDE 2: KENAL REKAN SETIM (30 DETIK TEBAK KEBIASAAN & GAYA KERJA)
     // ==========================================
     function selectR2Speaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -1499,14 +1539,33 @@
       render();
     }
 
+    function getShuffledQuestionIndices(total) {
+      const arr = Array.from({ length: total }, (_, i) => i);
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function getR2MemberCandidates(team, activeSpeaker) {
+      const teammatesOnly = team.members.filter(m => m !== activeSpeaker);
+      if (teammatesOnly.length >= 2) return teammatesOnly;
+      return team.members;
+    }
+
     function renderRound2() {
       const team = state.teams[state.activeTeamIdx];
-      const item = ROUND2_WORDS[state.r2WordIdx % ROUND2_WORDS.length];
       const activePlayer = state.r2SelectedSpeaker || state.currentPlayerName;
+      const qIdx = state.r2QuestionOrder.length > 0
+        ? state.r2QuestionOrder[state.r2WordIdx % state.r2QuestionOrder.length]
+        : (state.r2WordIdx % ROUND2_TEAM_QUESTIONS.length);
+      const item = ROUND2_TEAM_QUESTIONS[qIdx];
+      const candidates = getR2MemberCandidates(team, activePlayer);
 
       return `
         <div class="space-y-4">
-          ${renderPrivateScoreBar('Ronde 2 dari 3: Estafet Kata Kunci (30 Detik)', 'Jelaskan kata utama selama 30 detik, lalu lanjut ke Ronde 3!')}
+          ${renderPrivateScoreBar('Ronde 2 dari 3: Kenal Rekan Setim (30 Detik)', 'Tebak kebiasaan & gaya kerja teman satu tim sebanyak-banyaknya dalam 30 detik!')}
 
           <div class="glass-card rounded-3xl p-4 sm:p-8 text-center">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-5">
@@ -1536,13 +1595,13 @@
                 ` : ''}
 
                 <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-teal-100 text-teal-600 flex items-center justify-center mx-auto mb-3">
-                  <i data-lucide="message-square-quote" class="w-6 h-6 sm:w-7 sm:h-7"></i>
+                  <i data-lucide="user-search" class="w-6 h-6 sm:w-7 sm:h-7"></i>
                 </div>
                 <h3 class="text-lg sm:text-xl font-extrabold text-slate-900 mb-1">
-                  ${activePlayer ? `Giliran ${activePlayer} — Ronde 2` : `Pilih Nama Anda (${team.name})`}
+                  ${activePlayer ? `Giliran ${activePlayer} — Kenal Rekan Setim` : `Pilih Nama Anda (${team.name})`}
                 </h3>
                 <p class="text-xs text-slate-600 mb-5">
-                  Jelaskan kata kunci yang muncul di layar selama <strong>30 detik</strong> tanpa menyebut kata tabu.
+                  Dalam <strong>30 detik</strong>, pilih <strong>nama teman satu tim</strong> yang paling cocok dengan kebiasaan atau gaya kerja pada setiap pertanyaan (+10 poin per soal).
                 </p>
 
                 <div class="flex flex-wrap justify-center gap-2 mb-6">
@@ -1560,33 +1619,49 @@
 
                 <button ${!state.r2SelectedSpeaker ? 'disabled' : ''} onclick="startR2Timer()"
                   class="w-full sm:w-auto px-7 py-3.5 sm:py-4 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs sm:text-sm shadow-lg transition" style="${!state.r2SelectedSpeaker ? 'opacity:0.45; cursor:not-allowed;' : ''}">
-                  ${state.r2SelectedSpeaker ? `Mulai Estafet 30 Detik (${state.r2SelectedSpeaker})` : 'Pilih Nama Anda Terlebih Dahulu'}
+                  ${state.r2SelectedSpeaker ? `Mulai Kuis 30 Detik (${state.r2SelectedSpeaker})` : 'Pilih Nama Anda Terlebih Dahulu'}
                 </button>
               </div>
             ` : state.r2Timer > 0 ? `
-              <div class="max-w-md mx-auto">
-                <p class="text-xs font-bold text-teal-700 mb-3">Pemandu Kata: ${state.r2SelectedSpeaker} (${team.name})</p>
-                <div class="p-5 sm:p-6 rounded-2xl bg-slate-900 text-white shadow-xl mb-5">
-                  <p class="uppercase tracking-widest text-teal-400 font-bold mb-1" style="font-size: 10px;">Kata Utama (Jelaskan!)</p>
-                  <div class="text-2xl sm:text-4xl font-black tracking-wide mb-4 sm:mb-5">${item.word}</div>
+              <div class="max-w-lg mx-auto text-left">
+                <div class="flex items-center justify-between text-xs font-bold text-teal-700 mb-2">
+                  <span>Soal #${state.r2CorrectCount + 1} • Penjawab: ${state.r2SelectedSpeaker}</span>
+                  <span>Skor Sesi: +${state.r2SessionScore} Pts</span>
+                </div>
 
-                  <div class="border-t border-slate-700 pt-3.5">
-                    <p class="uppercase tracking-wider text-rose-400 font-bold mb-2" style="font-size: 10px;">Kata Tabu (Dilarang Diucapkan):</p>
-                    <div class="flex flex-wrap justify-center gap-1.5">
-                      ${item.tabu.map(w => `<span class="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-rose-200 text-xs font-semibold border border-rose-400" style="background: rgba(244,63,94,0.2);">${w}</span>`).join('')}
-                    </div>
+                <div class="p-4 sm:p-6 rounded-2xl bg-slate-900 text-white shadow-xl mb-4">
+                  <span class="inline-block px-2.5 py-0.5 rounded-md bg-teal-600 text-white font-extrabold uppercase tracking-wider mb-2" style="font-size: 10px;">
+                    ${item.category}
+                  </span>
+                  <div class="text-sm sm:text-lg font-extrabold leading-snug text-white">
+                    "${item.q}"
                   </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2.5 sm:gap-3">
-                  <button onclick="r2Skip()" class="py-3.5 sm:py-4 rounded-2xl bg-amber-100 hover:bg-amber-200 text-amber-900 font-extrabold text-xs sm:text-sm transition">
-                    Lewati (-5)
-                  </button>
-                  <button onclick="r2Correct()" class="py-3.5 sm:py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm shadow-md transition">
-                    Benar! (+10)
+                <p class="font-bold text-slate-500 uppercase tracking-wider mb-2.5 text-center" style="font-size: 11px;">
+                  Pilih Nama Anggota ${team.name} yang Paling Sesuai:
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+                  ${candidates.map(member => `
+                    <button onclick="r2PickTeammate('${member.replace(/'/g, "\\'")}')"
+                      class="p-3.5 rounded-2xl border-2 border-slate-200 bg-white hover:border-teal-600 hover:bg-teal-50 text-left font-extrabold text-xs sm:text-sm text-slate-900 transition flex items-center justify-between gap-2 shadow-sm">
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <span class="w-8 h-8 rounded-xl bg-teal-100 text-teal-800 font-extrabold text-xs flex items-center justify-center flex-shrink-0">
+                          ${member.charAt(0).toUpperCase()}
+                        </span>
+                        <span class="truncate">${member}</span>
+                      </div>
+                      <i data-lucide="chevron-right" class="w-4 h-4 text-teal-600 flex-shrink-0"></i>
+                    </button>
+                  `).join('')}
+                </div>
+
+                <div class="text-center">
+                  <button onclick="r2Skip()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs transition">
+                    Lewati Pertanyaan Ini →
                   </button>
                 </div>
-                <p class="text-xs font-bold text-slate-500 mt-4">Skor Sesi Anda: ${state.r2SessionScore} Poin (${state.r2CorrectCount} Kata Tertebak)</p>
               </div>
             ` : `
               <div class="py-5">
@@ -1595,7 +1670,7 @@
                 </div>
                 <h3 class="text-xl sm:text-2xl font-extrabold text-slate-900 mb-1">Ronde 2 Selesai!</h3>
                 <p class="text-xs sm:text-sm text-slate-600 mb-6">
-                  <strong>${state.r2SelectedSpeaker}</strong> (${team.name}) berhasil menebak <strong>${state.r2CorrectCount} kata</strong> (+<strong>${Math.max(0, state.r2SessionScore)} poin</strong>).
+                  <strong>${state.r2SelectedSpeaker}</strong> (${team.name}) berhasil menjawab <strong>${state.r2CorrectCount} profil rekan setim</strong> (+<strong>${Math.max(0, state.r2SessionScore)} poin</strong>).
                 </p>
 
                 <div class="max-w-md mx-auto">
@@ -1615,6 +1690,11 @@
       if (!state.r2SelectedSpeaker) return;
       initAudio();
       state.teams[state.activeTeamIdx].r2Speaker = state.r2SelectedSpeaker;
+      state.r2QuestionOrder = getShuffledQuestionIndices(ROUND2_TEAM_QUESTIONS.length);
+      state.r2WordIdx = 0;
+      state.r2SessionScore = 0;
+      state.r2CorrectCount = 0;
+      state.r2AnswersLog = [];
       state.r2Running = true;
       state.r2Interval = setInterval(() => {
         state.r2Timer--;
@@ -1631,7 +1711,8 @@
 
           team.r2PlayerSubmissions[speaker] = {
             words: state.r2CorrectCount,
-            points: finalAdd
+            points: finalAdd,
+            answers: [...state.r2AnswersLog]
           };
 
           team.score = team.score - prevPlayerPts + finalAdd;
@@ -1645,8 +1726,19 @@
       render();
     }
 
-    function r2Correct() {
+    function r2PickTeammate(pickedMember) {
+      if (!state.r2Running || state.r2Timer <= 0) return;
       playSuccess();
+      const qIdx = state.r2QuestionOrder.length > 0
+        ? state.r2QuestionOrder[state.r2WordIdx % state.r2QuestionOrder.length]
+        : (state.r2WordIdx % ROUND2_TEAM_QUESTIONS.length);
+      const item = ROUND2_TEAM_QUESTIONS[qIdx];
+
+      state.r2AnswersLog.push({
+        category: item.category,
+        question: item.q,
+        pickedMember
+      });
       state.r2SessionScore += 10;
       state.r2CorrectCount++;
       state.r2WordIdx++;
@@ -1654,8 +1746,7 @@
     }
 
     function r2Skip() {
-      playError();
-      state.r2SessionScore -= 5;
+      playTone(360, 'sine', 0.08, 0.08);
       state.r2WordIdx++;
       render();
     }
@@ -1890,7 +1981,7 @@
     }
 
     // ==========================================
-    // MENU DASHBOARD (TANPA TAMBAH TIM — HANYA PILIH TIM & LIHAT NILAI PRIBADI)
+    // MENU DASHBOARD
     // ==========================================
     function selectPrivateMember(name) {
       state.selectedPrivateMemberName = name;
@@ -2096,8 +2187,8 @@
                     <p class="text-sky-600 font-bold" style="font-size: 10px;">+${personalR1Points} pts</p>
                   </div>
                   <div class="p-2 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
-                    <p class="text-slate-500 font-semibold" style="font-size: 10px;">R2: Estafet Kata</p>
-                    <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${personalR2Data.words} kata</p>
+                    <p class="text-slate-500 font-semibold" style="font-size: 10px;">R2: Kenal Rekan</p>
+                    <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${personalR2Data.words} soal</p>
                     <p class="text-teal-600 font-bold" style="font-size: 10px;">+${personalR2Data.points} pts</p>
                   </div>
                   <div class="p-2 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
@@ -2483,7 +2574,7 @@
                             <tr class="bg-white text-slate-500 font-bold border-b border-slate-100 uppercase" style="font-size: 11px;">
                               <th class="p-3">Tim &amp; Anggota</th>
                               <th class="p-3 text-center">R1: Frekuensi (5 Soal)</th>
-                              <th class="p-3 text-center">R2: Estafet Kata</th>
+                              <th class="p-3 text-center">R2: Kenal Rekan</th>
                               <th class="p-3 text-center">R3: Misi (3 Kasus)</th>
                               <th class="p-3 text-center">Total Skor</th>
                               <th class="p-3">Predikat Kekompakan</th>
@@ -2501,8 +2592,8 @@
                                   <span class="text-slate-400" style="font-size: 10px;">(+${t.r1Points ?? t.r1Harmony} pts)</span>
                                 </td>
                                 <td class="p-3 text-center">
-                                  <span class="font-bold text-teal-700 block">${t.r2Words} kata</span>
-                                  <span class="text-slate-500 block" style="font-size: 10px;">Pemandu: ${t.r2Speaker || '-'}</span>
+                                  <span class="font-bold text-teal-700 block">${t.r2Words} soal</span>
+                                  <span class="text-slate-500 block" style="font-size: 10px;">(+${t.r2Points ?? t.r2Words * 10} pts)</span>
                                 </td>
                                 <td class="p-3 text-center">
                                   <span class="font-bold text-indigo-700 block">+${t.r3Score} pts</span>
@@ -2620,8 +2711,8 @@
         'Anggota',
         'R1 Satu Frekuensi (%)',
         'R1 Poin',
-        'R2 Pemandu Kata',
-        'R2 Estafet Kata',
+        'R2 Peserta Terakhir',
+        'R2 Kenal Rekan (Soal)',
         'R2 Poin',
         'R3 Ringkasan Keputusan',
         'R3 Poin',
