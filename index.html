@@ -255,8 +255,8 @@
         <div class="flex items-center gap-2.5">
           <i data-lucide="database" class="w-5 h-5 text-teal-400"></i>
           <div>
-            <h2 class="font-bold text-sm sm:text-base leading-tight">Panel Admin — Database &amp; Manajemen Tim</h2>
-            <p class="text-slate-400 hidden sm:block" style="font-size: 11px;">Kelola susunan tim/anggota &amp; pantau rekapitulasi cloud Supabase</p>
+            <h2 class="font-bold text-sm sm:text-base leading-tight">Panel Admin — Database &amp; Simpan Tim</h2>
+            <p class="text-slate-400 hidden sm:block" style="font-size: 11px;">Kelola &amp; simpan susunan tim/anggota ke Supabase serta pantau rekapitulasi</p>
           </div>
         </div>
         <button onclick="closeAdminModal()" class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition">
@@ -553,7 +553,7 @@
       }
     }
 
-    // Berlangganan perubahan realtime dari Supabase agar HP otomatis ter-update saat Admin mengubah tim
+    // Berlangganan perubahan realtime dari Supabase agar HP otomatis ter-update saat Admin menyimpan tim
     function initSupabaseRealtime() {
       if (!supabaseClient) return;
       try {
@@ -617,18 +617,33 @@
           if (!error) {
             updateDbStatusBadge(true, 'Cloud', 'Supabase Terhubung');
             if (showFeedback) {
-              state.adminTeamSaveMsg = 'Susunan tim & anggota berhasil disimpan ke Supabase & tersinkron ke semua HP!';
+              playSuccess();
+              state.adminTeamSaveMsg = 'Data tim & anggota berhasil disimpan ke Supabase dan tersinkron ke seluruh HP peserta!';
               renderAdminBody();
               setTimeout(() => {
                 state.adminTeamSaveMsg = '';
                 if (state.adminLoggedIn && state.adminTab === 'teams') renderAdminBody();
               }, 3500);
             }
+          } else if (showFeedback) {
+            playError();
+            state.adminTeamSaveMsg = 'Gagal menyimpan ke Supabase (Cek API Key / RLS). Data tersimpan lokal.';
+            renderAdminBody();
           }
-        } catch (e) {}
+        } catch (e) {
+          if (showFeedback) {
+            state.adminTeamSaveMsg = 'Koneksi terputus. Susunan tim tersimpan di penyimpanan lokal.';
+            renderAdminBody();
+          }
+        }
       } else if (showFeedback) {
-        state.adminTeamSaveMsg = 'Susunan tim & anggota tersimpan di penyimpanan lokal.';
+        playSuccess();
+        state.adminTeamSaveMsg = 'Susunan tim & anggota berhasil disimpan di penyimpanan lokal.';
         renderAdminBody();
+        setTimeout(() => {
+          state.adminTeamSaveMsg = '';
+          if (state.adminLoggedIn && state.adminTab === 'teams') renderAdminBody();
+        }, 3500);
       }
     }
 
@@ -636,7 +651,6 @@
       screen: 'setup', // 'setup' | 'round1' | 'round2' | 'round3' | 'summary' (Menu Dashboard)
       mode: 'multi',
       teams: loadLocalTeams('multi'),
-      newMemberDrafts: {},
       adminMemberDrafts: {},
       adminNewTeamName: '',
       adminTeamSaveMsg: '',
@@ -675,7 +689,7 @@
       saveStatus: 'idle',
       // Admin state
       adminLoggedIn: false,
-      adminTab: 'recap', // 'recap' | 'teams'
+      adminTab: 'teams', // 'recap' | 'teams'
       adminLoading: false,
       adminHistoryCache: [],
       expandedSessionId: null
@@ -867,7 +881,7 @@
     }
 
     // ==========================================
-    // 4. SCREEN RENDERERS (TAMPILAN AWAL — SINKRON HP & LAPTOP)
+    // 4. SCREEN RENDERERS (TANPA TOMBOL TAMBAH TIM DI DASHBOARD/SETUP)
     // ==========================================
     function selectSetupActiveTeam(tIdx) {
       if (!state.teams[tIdx]) return;
@@ -932,7 +946,7 @@
                 Uji Kekompakan &amp; <span class="text-teal-300">Satu Frekuensi</span> Tim Yankes
               </h1>
               <p class="text-xs sm:text-sm text-sky-100 mt-2 max-w-2xl leading-relaxed">
-                Pilih <strong>Tim 1</strong> atau <strong>Tim 2</strong> di HP masing-masing agar setiap tim dapat <strong>bermain dalam waktu bersamaan</strong> melewati <strong>Ronde 1 → Ronde 2 → Ronde 3</strong>.
+                Pilih <strong>Tim</strong> Anda di bawah ini agar setiap tim dapat <strong>bermain dalam waktu bersamaan</strong> melewati <strong>Ronde 1 → Ronde 2 → Ronde 3</strong>.
               </p>
 
               <!-- 3 KARTU RINGKASAN RONDE -->
@@ -996,16 +1010,10 @@
                   <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">1</span>
                   <h2 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">Pilih Mode Permainan</h2>
                 </div>
-                <div class="flex items-center gap-1.5">
-                  <button onclick="manualForceSync()" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition">
-                    <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                    <span>Sinkron Tim</span>
-                  </button>
-                  <button onclick="openAdminModal('teams')" class="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-sky-700 bg-slate-100 hover:bg-sky-50 px-2.5 py-1 rounded-lg transition">
-                    <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
-                    <span>Admin Tim</span>
-                  </button>
-                </div>
+                <button onclick="manualForceSync()" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition">
+                  <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                  <span>Sinkron Tim</span>
+                </button>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1017,7 +1025,7 @@
                       </div>
                       <div>
                         <span class="font-extrabold text-xs sm:text-sm text-slate-900 block">Main Paralel Antar Tim</span>
-                        <span class="font-semibold text-sky-700" style="font-size: 11px;">Tim 1 &amp; Tim 2 Main Bersamaan</span>
+                        <span class="font-semibold text-sky-700" style="font-size: 11px;">Semua Tim Main Bersamaan</span>
                       </div>
                     </div>
                     <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${state.mode === 'multi' ? 'bg-sky-600 text-white' : 'border-2 border-slate-300'}">
@@ -1045,20 +1053,13 @@
               </div>
             </div>
 
-            <!-- Langkah 2: Pilih Tim yang Akan Bermain & Daftar Anggota -->
+            <!-- Langkah 2: Pilih Tim yang Akan Bermain (Hanya Tampil Daftar Tim & Anggota) -->
             <div class="mb-6">
-              <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <div class="flex items-center gap-2">
-                  <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">2</span>
-                  <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">
-                    ${state.mode === 'multi' ? 'Pilih Tim Anda untuk Bermain Bersamaan' : 'Tim & Daftar Anggota'}
-                  </h3>
-                </div>
-                ${state.mode === 'multi' && state.teams.length < 4 ? `
-                  <button onclick="addTeam()" class="inline-flex items-center gap-1 text-xs font-extrabold text-sky-700 hover:bg-sky-100 bg-sky-50 px-2.5 py-1 rounded-xl border border-sky-200 transition">
-                    <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Tambah Tim (${state.teams.length}/4)
-                  </button>
-                ` : ''}
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">2</span>
+                <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+                  ${state.mode === 'multi' ? 'Pilih Tim Anda untuk Bermain Bersamaan' : 'Tim & Daftar Anggota'}
+                </h3>
               </div>
 
               <div class="grid grid-cols-1 ${state.mode === 'multi' ? 'md:grid-cols-2' : ''} gap-3.5">
@@ -1090,7 +1091,7 @@
 
                         <p class="font-bold text-slate-600 mb-2" style="font-size: 11px;">Anggota (${t.members.length} orang):</p>
 
-                        <div class="flex flex-wrap gap-1.5 mb-3">
+                        <div class="flex flex-wrap gap-1.5">
                           ${t.members.map(m => `
                             <span class="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-xl border text-xs font-bold ${accent.chipBg}">
                               <span class="w-4 h-4 rounded-md ${accent.avatarBg} font-extrabold flex items-center justify-center flex-shrink-0" style="font-size: 9px;">
@@ -1100,18 +1101,6 @@
                             </span>
                           `).join('')}
                         </div>
-                      </div>
-
-                      <div onclick="event.stopPropagation()" class="flex gap-1.5 pt-2.5 border-t border-slate-200">
-                        <input type="text" id="newMemberInput_${tIdx}"
-                          value="${state.newMemberDrafts[tIdx] || ''}"
-                          oninput="state.newMemberDrafts[${tIdx}] = this.value"
-                          onkeydown="if(event.key==='Enter'){ event.preventDefault(); addMemberToTeam(${tIdx}); }"
-                          placeholder="Tambah nama ke Tim ${tIdx + 1}..."
-                          class="text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-xl px-2.5 py-2 w-full focus:outline-none focus:border-sky-500" />
-                        <button onclick="addMemberToTeam(${tIdx})" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
-                          + Tambah
-                        </button>
                       </div>
                     </div>
                   `;
@@ -1138,7 +1127,6 @@
     async function setMode(mode) {
       state.mode = mode;
       state.teams = loadLocalTeams(mode);
-      state.newMemberDrafts = {};
       state.activeTeamIdx = 0;
       state.dashboardCompetingTeamIdx = 0;
       state.selectedPrivateTeamIdx = 0;
@@ -1152,7 +1140,6 @@
       const n = state.teams.length + 1;
       const teamTitle = customName.trim() || `Tim Yankes ${n}`;
       state.teams.push(createBlankTeam(Date.now(), teamTitle, [`Anggota ${n}A`, `Anggota ${n}B`]));
-      persistTeamsConfig(true);
       render();
       if (state.adminLoggedIn) renderAdminBody();
     }
@@ -1162,43 +1149,36 @@
       state.teams.splice(idx, 1);
       if (state.activeTeamIdx >= state.teams.length) state.activeTeamIdx = 0;
       if (state.dashboardCompetingTeamIdx >= state.teams.length) state.dashboardCompetingTeamIdx = 0;
-      persistTeamsConfig(true);
       render();
       if (state.adminLoggedIn) renderAdminBody();
     }
 
     function updateTeamName(idx, val) {
       state.teams[idx].name = val.trim() || `Tim ${idx + 1}`;
-      persistTeamsConfig(true);
       render();
     }
 
-    function addMemberToTeam(tIdx, fromAdmin = false) {
-      const inputId = fromAdmin ? `adminNewMemberInput_${tIdx}` : `newMemberInput_${tIdx}`;
-      const draftObj = fromAdmin ? state.adminMemberDrafts : state.newMemberDrafts;
-      const inputEl = document.getElementById(inputId);
-      const rawName = (inputEl ? inputEl.value : draftObj[tIdx] || '').trim();
+    function addMemberToTeam(tIdx) {
+      const inputEl = document.getElementById(`adminNewMemberInput_${tIdx}`);
+      const rawName = (inputEl ? inputEl.value : state.adminMemberDrafts[tIdx] || '').trim();
       if (!rawName) return;
       if (!state.teams[tIdx].members.includes(rawName)) {
         state.teams[tIdx].members.push(rawName);
       }
-      draftObj[tIdx] = '';
-      persistTeamsConfig(fromAdmin);
+      state.adminMemberDrafts[tIdx] = '';
       render();
       if (state.adminLoggedIn) renderAdminBody();
     }
 
-    function removeMemberFromTeam(tIdx, mIdx, fromAdmin = false) {
+    function removeMemberFromTeam(tIdx, mIdx) {
       if (state.teams[tIdx].members.length <= 1) return;
       state.teams[tIdx].members.splice(mIdx, 1);
-      persistTeamsConfig(fromAdmin);
       render();
       if (state.adminLoggedIn) renderAdminBody();
     }
 
     function startGameForTeam(teamIdx = 0) {
       initAudio();
-      persistTeamsConfig();
       playSuccess();
       const targetIdx = state.teams[teamIdx] ? teamIdx : 0;
       const targetTeam = state.teams[targetIdx];
@@ -1910,7 +1890,7 @@
     }
 
     // ==========================================
-    // MENU DASHBOARD (PILIH TIM BERLOMBA & NILAI PRIBADI)
+    // MENU DASHBOARD (TANPA TAMBAH TIM — HANYA PILIH TIM & LIHAT NILAI PRIBADI)
     // ==========================================
     function selectPrivateMember(name) {
       state.selectedPrivateMemberName = name;
@@ -2166,9 +2146,9 @@
     }
 
     // ==========================================
-    // 5. ADMIN DASHBOARD (KELOLA TIM/ANGGOTA & REKAP SUPABASE)
+    // 5. ADMIN DASHBOARD (SIMPAN TIM & REKAP SUPABASE)
     // ==========================================
-    async function openAdminModal(initialTab = 'recap') {
+    async function openAdminModal(initialTab = 'teams') {
       state.adminTab = initialTab;
       document.getElementById('adminModal').classList.remove('hidden');
       if (state.adminLoggedIn) {
@@ -2228,7 +2208,7 @@
               <i data-lucide="lock" class="w-7 h-7"></i>
             </div>
             <h3 class="text-lg font-extrabold text-slate-900 mb-1">Verifikasi Akses Admin</h3>
-            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk mengelola tim/anggota &amp; melihat rekapitulasi Supabase (PIN default: <strong>1234</strong>).</p>
+            <p class="text-xs text-slate-500 mb-5">Masukkan PIN Admin Yankes untuk kelola &amp; simpan tim ke Supabase (PIN default: <strong>1234</strong>).</p>
             <input id="adminPinInput" type="password" inputmode="numeric" maxlength="8" placeholder="••••"
               onkeydown="if(event.key==='Enter') verifyAdminPin()"
               class="w-full text-center text-xl font-black border-2 border-slate-200 rounded-xl py-3 mb-3 focus:outline-none focus:border-sky-600" style="letter-spacing: 0.5em;" />
@@ -2245,6 +2225,16 @@
       const adminNavTabs = `
         <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-5 border-b border-slate-200">
           <div class="flex items-center gap-2">
+            <button onclick="switchAdminTab('teams')"
+              class="px-3.5 py-2 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition ${
+                state.adminTab === 'teams'
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200'
+              }">
+              <i data-lucide="users" class="w-4 h-4"></i>
+              <span>Kelola &amp; Simpan Tim (${state.teams.length})</span>
+            </button>
+
             <button onclick="switchAdminTab('recap')"
               class="px-3.5 py-2 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition ${
                 state.adminTab === 'recap'
@@ -2254,16 +2244,6 @@
               <i data-lucide="bar-chart-3" class="w-4 h-4 ${state.adminTab === 'recap' ? 'text-teal-400' : ''}"></i>
               <span>Rekapitulasi</span>
             </button>
-
-            <button onclick="switchAdminTab('teams')"
-              class="px-3.5 py-2 rounded-xl text-xs font-extrabold inline-flex items-center gap-1.5 transition ${
-                state.adminTab === 'teams'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200'
-              }">
-              <i data-lucide="users" class="w-4 h-4"></i>
-              <span>Kelola Tim (${state.teams.length})</span>
-            </button>
           </div>
 
           <button onclick="adminLogout()" class="text-xs font-bold text-slate-500 hover:text-rose-600 px-2 py-1">
@@ -2272,7 +2252,7 @@
         </div>
       `;
 
-      // TAB 2: KELOLA TIM & ANGGOTA
+      // TAB KELOLA & SIMPAN TIM
       if (state.adminTab === 'teams') {
         const teamAccents = [
           { border: 'border-sky-200', badgeBg: 'bg-sky-600', chipBg: 'bg-sky-50 border-sky-200 text-sky-900', avatarBg: 'bg-sky-600 text-white' },
@@ -2287,7 +2267,7 @@
 
             ${state.adminTeamSaveMsg ? `
               <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold mb-4 flex items-center gap-2">
-                <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600"></i>
+                <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
                 <span>${state.adminTeamSaveMsg}</span>
               </div>
             ` : ''}
@@ -2296,7 +2276,7 @@
               <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div>
                   <h4 class="font-extrabold text-sm text-slate-900">Tambah Tim Baru (Maks. 4 Tim)</h4>
-                  <p class="text-slate-500" style="font-size: 11px;">Perubahan tim &amp; nama anggota otomatis tersinkron ke Supabase dan seluruh layar HP peserta.</p>
+                  <p class="text-slate-500" style="font-size: 11px;">Setelah menambah atau mengubah anggota tim, klik tombol <strong>Simpan Tim</strong> agar tersinkron ke seluruh HP peserta.</p>
                 </div>
                 <span class="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700">
                   Total: ${state.teams.length}/4 Tim
@@ -2355,7 +2335,7 @@
                             </span>
                             <span>${m}</span>
                             ${t.members.length > 1 ? `
-                              <button onclick="removeMemberFromTeam(${tIdx}, ${mIdx}, true)" title="Hapus ${m}" class="ml-0.5 opacity-60 hover:opacity-100 text-rose-600">
+                              <button onclick="removeMemberFromTeam(${tIdx}, ${mIdx})" title="Hapus ${m}" class="ml-0.5 opacity-60 hover:opacity-100 text-rose-600">
                                 <i data-lucide="x" class="w-3 h-3"></i>
                               </button>
                             ` : ''}
@@ -2364,15 +2344,22 @@
                       </div>
                     </div>
 
-                    <div class="flex gap-1.5 pt-2.5 border-t border-slate-100">
-                      <input type="text" id="adminNewMemberInput_${tIdx}"
-                        value="${state.adminMemberDrafts[tIdx] || ''}"
-                        oninput="state.adminMemberDrafts[${tIdx}] = this.value"
-                        onkeydown="if(event.key==='Enter'){ event.preventDefault(); addMemberToTeam(${tIdx}, true); }"
-                        placeholder="Ketik nama anggota baru..."
-                        class="text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 w-full focus:outline-none focus:border-sky-500" />
-                      <button onclick="addMemberToTeam(${tIdx}, true)" class="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
-                        + Tambah Orang
+                    <div class="space-y-2 pt-2.5 border-t border-slate-100">
+                      <div class="flex gap-1.5">
+                        <input type="text" id="adminNewMemberInput_${tIdx}"
+                          value="${state.adminMemberDrafts[tIdx] || ''}"
+                          oninput="state.adminMemberDrafts[${tIdx}] = this.value"
+                          onkeydown="if(event.key==='Enter'){ event.preventDefault(); addMemberToTeam(${tIdx}); }"
+                          placeholder="Ketik nama anggota baru..."
+                          class="text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 w-full focus:outline-none focus:border-sky-500" />
+                        <button onclick="addMemberToTeam(${tIdx})" class="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex-shrink-0 transition">
+                          + Orang
+                        </button>
+                      </div>
+
+                      <button onclick="persistTeamsConfig(true)" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm transition">
+                        <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                        <span>Simpan Tim ${tIdx + 1}</span>
                       </button>
                     </div>
                   </div>
@@ -2381,10 +2368,10 @@
             </div>
 
             <div class="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-              <span class="text-slate-400" style="font-size: 11px;">Tabel Konfigurasi: public.yankes_game_config</span>
-              <button onclick="persistTeamsConfig(true)" class="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm">
+              <span class="text-slate-400" style="font-size: 11px;">Sinkronisasi Otomatis: Supabase &amp; Penyimpanan Lokal</span>
+              <button onclick="persistTeamsConfig(true)" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 shadow-md">
                 <i data-lucide="cloud-upload" class="w-4 h-4"></i>
-                <span>Simpan Semua ke Cloud Supabase</span>
+                <span>Simpan Semua Tim ke Cloud</span>
               </button>
             </div>
           </div>
@@ -2393,7 +2380,7 @@
         return;
       }
 
-      // TAB 1: REKAPITULASI SESI & NILAI
+      // TAB REKAPITULASI SESI & NILAI
       if (state.adminLoading) {
         body.innerHTML = `
           <div>
