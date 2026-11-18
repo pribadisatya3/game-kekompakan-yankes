@@ -486,7 +486,7 @@
           updateDbStatusBadge(true);
           if (data && Array.isArray(data.teams_data) && data.teams_data.length > 0) {
             state.teams = data.teams_data.map((t, idx) => createBlankTeam(t.id || idx + 1, t.name, [...t.members]));
-            if (state.screen === 'setup') render();
+            if (state.screen === 'setup' || state.screen === 'summary') render();
           }
         } else {
           updateDbStatusBadge(false, 'Cek Tabel Supabase');
@@ -552,6 +552,7 @@
       r3Interval: null,
       r3SelectedOption: null,
       // Menu Dashboard State
+      dashboardCompetingTeamIdx: 0, // Tim yang dipilih untuk berlomba dari Menu Dashboard
       selectedPrivateTeamIdx: null,
       selectedPrivateMemberName: null,
       sessionSavedOnce: false,
@@ -678,13 +679,19 @@
       render();
     }
 
-    // Navigasi langsung ke Menu Dashboard (bisa dipanggil setelah nama selesai menjawab atau dari header)
+    // Navigasi langsung ke Menu Dashboard
     async function openDashboardScreen(preselectTeamIdx = null, preselectMember = null) {
       clearTimers();
-      if (preselectTeamIdx !== null) {
+      if (preselectTeamIdx !== null && state.teams[preselectTeamIdx]) {
+        state.dashboardCompetingTeamIdx = preselectTeamIdx;
         state.selectedPrivateTeamIdx = preselectTeamIdx;
-      } else if (state.selectedPrivateTeamIdx === null) {
-        state.selectedPrivateTeamIdx = state.activeTeamIdx;
+      } else {
+        if (!state.teams[state.dashboardCompetingTeamIdx]) {
+          state.dashboardCompetingTeamIdx = 0;
+        }
+        if (state.selectedPrivateTeamIdx === null || !state.teams[state.selectedPrivateTeamIdx]) {
+          state.selectedPrivateTeamIdx = state.dashboardCompetingTeamIdx;
+        }
       }
       if (preselectMember) {
         state.selectedPrivateMemberName = preselectMember;
@@ -692,7 +699,6 @@
       state.screen = 'summary';
       render();
 
-      // Jika seluruh tim telah selesai semua ronde, simpan ke Supabase otomatis
       const allRoundsDone = state.teams.every(t =>
         t.members.every(m => Boolean(t.r1PlayerSubmissions[m])) && t.r2Completed && t.r3Completed
       );
@@ -701,14 +707,31 @@
       }
     }
 
-    function resumeRoundFromDashboard(roundScreen, teamIdx = 0) {
-      clearTimers();
+    // Memilih tim yang akan berlomba di Menu Dashboard
+    function selectDashboardCompetingTeam(teamIdx) {
+      if (!state.teams[teamIdx]) return;
+      playTone(540, 'sine', 0.08, 0.1);
+      state.dashboardCompetingTeamIdx = teamIdx;
       state.activeTeamIdx = teamIdx;
+      state.selectedPrivateTeamIdx = teamIdx;
+      state.selectedPrivateMemberName = null;
+      render();
+    }
+
+    // Mulai / lanjutkan ronde tertentu khusus untuk tim yang dipilih di Menu Dashboard
+    function resumeRoundFromDashboard(roundScreen, teamIdx = null) {
+      clearTimers();
+      initAudio();
+      const targetIdx = teamIdx !== null ? teamIdx : state.dashboardCompetingTeamIdx;
+      state.activeTeamIdx = state.teams[targetIdx] ? targetIdx : 0;
+      state.dashboardCompetingTeamIdx = state.activeTeamIdx;
+
       if (roundScreen === 'round1') {
         state.r1SelectedMember = null;
         state.r1PlayerQIdx = 0;
         state.r1TempAnswers = [];
         state.r1LastSelectedOpt = null;
+        state.r1PlayerDoneBanner = null;
       } else if (roundScreen === 'round2') {
         state.r2SelectedSpeaker = null;
         state.r2Timer = ROUND_DURATION_SECONDS;
@@ -852,7 +875,7 @@
                     </div>
                   </div>
                   <p class="text-xs text-slate-500 mt-2.5 leading-relaxed">
-                    Tiap tim bersaing dalam 3 ronde berwaktu 30 detik dan anggota yang selesai langsung masuk ke Menu Dashboard.
+                    Tiap tim bersaing dalam 3 ronde berwaktu 30 detik dan dapat dipilih langsung di Menu Dashboard.
                   </p>
                 </button>
 
@@ -953,11 +976,17 @@
               </div>
             </div>
 
-            <button onclick="startGame()" class="w-full py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-base flex items-center justify-center gap-2.5 cursor-pointer">
-              <i data-lucide="rocket" class="w-5 h-5"></i>
-              <span>Mulai Kompetisi 3 Ronde (@30 Detik)</span>
-              <i data-lucide="arrow-right" class="w-5 h-5"></i>
-            </button>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <button onclick="startGame()" class="sm:col-span-2 py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2.5 cursor-pointer">
+                <i data-lucide="rocket" class="w-5 h-5"></i>
+                <span>Mulai Kompetisi 3 Ronde (@30 Detik)</span>
+              </button>
+
+              <button onclick="openDashboardScreen(0)" class="py-4 rounded-2xl border-2 border-slate-900 bg-white hover:bg-slate-50 text-slate-900 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition">
+                <i data-lucide="layout-dashboard" class="w-4 h-4 text-sky-600"></i>
+                <span>Pilih Tim di Dashboard</span>
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -967,6 +996,9 @@
       state.mode = mode;
       state.teams = loadLocalTeams(mode);
       state.newMemberDrafts = {};
+      state.dashboardCompetingTeamIdx = 0;
+      state.selectedPrivateTeamIdx = 0;
+      state.selectedPrivateMemberName = null;
       render();
       await syncTeamsFromSupabase(mode);
     }
@@ -981,6 +1013,9 @@
 
     function removeTeam(idx) {
       state.teams.splice(idx, 1);
+      if (state.dashboardCompetingTeamIdx >= state.teams.length) {
+        state.dashboardCompetingTeamIdx = 0;
+      }
       persistTeamsConfig();
       render();
     }
@@ -1028,13 +1063,14 @@
         t.r3Completed = false;
       });
       state.activeTeamIdx = 0;
+      state.dashboardCompetingTeamIdx = 0;
       state.r1SelectedMember = null;
       state.r1PlayerQIdx = 0;
       state.r1TempAnswers = [];
       state.r1LastSelectedOpt = null;
       state.r1PlayerDoneBanner = null;
       state.r1Timer = ROUND_DURATION_SECONDS;
-      state.selectedPrivateTeamIdx = null;
+      state.selectedPrivateTeamIdx = 0;
       state.selectedPrivateMemberName = null;
       state.sessionSavedOnce = false;
       state.saveStatus = 'idle';
@@ -1053,7 +1089,6 @@
         if (state.r1Timer <= 5 && state.r1Timer > 0) playTick(true);
         if (state.r1Timer <= 0) {
           clearTimers();
-          // Jika waktu 30 detik habis, pilih opsi yang sedang disorot atau default opsi ke-0 lalu lanjut
           if (state.r1LastSelectedOpt === null) {
             state.r1LastSelectedOpt = 0;
           }
@@ -1111,7 +1146,6 @@
         return;
       }
 
-      // Semua 5 pertanyaan selesai dijawab oleh pemain ini
       const finishedPlayer = state.r1SelectedMember;
       team.r1PlayerSubmissions[finishedPlayer] = [...state.r1TempAnswers];
       state.r1SelectedMember = null;
@@ -1120,7 +1154,6 @@
       state.r1PlayerDoneBanner = finishedPlayer;
       playSuccess();
 
-      // Hitung sementara atau final tim
       recalculateTeamRound1(team);
       render();
     }
@@ -1129,7 +1162,6 @@
       const submittedMembers = team.members.filter(m => Boolean(team.r1PlayerSubmissions[m]));
       if (submittedMembers.length === 0) return;
 
-      // Kurangi poin R1 lama sebelum hitung ulang
       team.score -= team.r1Points;
       team.r1Details = [];
       let totalPoints = 0;
@@ -1172,7 +1204,6 @@
       if (state.mode === 'multi' && state.activeTeamIdx + 1 < state.teams.length) {
         state.activeTeamIdx++;
       } else {
-        state.activeTeamIdx = 0;
         state.r2SelectedSpeaker = null;
         state.r2Timer = ROUND_DURATION_SECONDS;
         state.r2Running = false;
@@ -1190,7 +1221,6 @@
       const allMembersDone = completedMembers.length === team.members.length;
       const hasMoreTeams = state.mode === 'multi' && state.activeTeamIdx + 1 < state.teams.length;
 
-      // TAMPILAN 1: Seluruh anggota tim sudah selesai
       if (allMembersDone) {
         return `
           <div class="space-y-4">
@@ -1217,7 +1247,7 @@
                 </button>
 
                 <button onclick="proceedAfterTeamRound1()" class="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition">
-                  <span>${hasMoreTeams ? `Lanjut ke Giliran ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 2: Estafet Kata (30 Detik)'}</span>
+                  <span>${hasMoreTeams ? `Lanjut ke Giliran ${state.teams[state.activeTeamIdx + 1].name}` : `Lanjut ke Ronde 2: Estafet Kata (${team.name})`}</span>
                   <i data-lucide="arrow-right" class="w-4 h-4"></i>
                 </button>
               </div>
@@ -1226,7 +1256,6 @@
         `;
       }
 
-      // TAMPILAN 2: Daftar nama anggota tim (Pemain yang baru selesai mendapat tombol langsung ke Menu Dashboard)
       if (!state.r1SelectedMember) {
         return `
           <div class="space-y-4">
@@ -1298,7 +1327,6 @@
         `;
       }
 
-      // TAMPILAN 3: Pemain aktif sedang menjawab Pertanyaan 1..5 (Timer 30 detik/soal)
       const question = ROUND1_QUESTIONS[state.r1PlayerQIdx];
       const hasNextQ = state.r1PlayerQIdx + 1 < totalQ;
       const progressPct = Math.round(((state.r1PlayerQIdx + 1) / totalQ) * 100);
@@ -1482,7 +1510,7 @@
                   </button>
 
                   <button onclick="nextR2Team()" class="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
-                    <span>${hasMoreTeams ? `Lanjut ke ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 3: Misi Darurat (30 Detik)'}</span>
+                    <span>${hasMoreTeams ? `Lanjut ke ${state.teams[state.activeTeamIdx + 1].name}` : `Lanjut ke Ronde 3: Misi Darurat (${team.name})`}</span>
                     <i data-lucide="arrow-right" class="w-4 h-4"></i>
                   </button>
                 </div>
@@ -1505,10 +1533,12 @@
           clearTimers();
           state.r2Running = false;
           const finalAdd = Math.max(0, state.r2SessionScore);
-          state.teams[state.activeTeamIdx].score += finalAdd;
-          state.teams[state.activeTeamIdx].r2Points = finalAdd;
-          state.teams[state.activeTeamIdx].r2Words = state.r2CorrectCount;
-          state.teams[state.activeTeamIdx].r2Completed = true;
+          const team = state.teams[state.activeTeamIdx];
+          team.score -= team.r2Points;
+          team.score += finalAdd;
+          team.r2Points = finalAdd;
+          team.r2Words = state.r2CorrectCount;
+          team.r2Completed = true;
           playFanfare();
         }
         render();
@@ -1540,7 +1570,6 @@
         state.r2SessionScore = 0;
         state.r2CorrectCount = 0;
       } else {
-        state.activeTeamIdx = 0;
         state.r3SelectedDecisionMaker = null;
         state.r3Idx = 0;
         state.r3SelectedOption = null;
@@ -1555,6 +1584,13 @@
     // ==========================================
     function selectR3DecisionMaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
+      const team = state.teams[state.activeTeamIdx];
+      // Reset skor R3 jika tim mengulang Ronde 3
+      team.score -= team.r3Score;
+      team.r3Score = 0;
+      team.r3Details = [];
+      team.r3Completed = false;
+
       state.r3SelectedDecisionMaker = memberName;
       state.r3Idx = 0;
       state.r3SelectedOption = null;
@@ -1719,7 +1755,6 @@
         state.r3Idx = 0;
         state.r3SelectedOption = null;
         state.r3SelectedDecisionMaker = null;
-        // Alihkan ke Menu Dashboard agar pemain yang selesai bisa melihat hasil & tim berikutnya siap
         await openDashboardScreen(finishedTeamIdx, finishedMember);
       } else {
         const finishedMember = state.r3SelectedDecisionMaker;
@@ -1757,10 +1792,11 @@
     }
 
     // ==========================================
-    // MENU DASHBOARD (PROGRES RONDE & NILAI PRIBADI PEMAIN)
+    // MENU DASHBOARD (PILIH TIM BERLOMBA, PROGRES RONDE & NILAI PRIBADI)
     // ==========================================
     function selectPrivateTeam(idx) {
       state.selectedPrivateTeamIdx = idx;
+      state.dashboardCompetingTeamIdx = idx;
       state.selectedPrivateMemberName = null;
       render();
     }
@@ -1771,14 +1807,36 @@
     }
 
     function renderSummary() {
-      const teamIdx = state.mode === 'single' ? 0 : state.selectedPrivateTeamIdx;
-      const chosenTeam = teamIdx !== null && state.teams[teamIdx] ? state.teams[teamIdx] : null;
-      const chosenMember = state.selectedPrivateMemberName;
+      const competingIdx = state.teams[state.dashboardCompetingTeamIdx] ? state.dashboardCompetingTeamIdx : 0;
+      const competingTeam = state.teams[competingIdx];
 
-      // Cek ronde mana saja yang belum diselesaikan agar pemain bisa melanjutkan langsung dari Menu Dashboard
-      const r1IncompleteTeamIdx = state.teams.findIndex(t => !t.members.every(m => Boolean(t.r1PlayerSubmissions[m])));
-      const r2IncompleteTeamIdx = state.teams.findIndex(t => !t.r2Completed);
-      const r3IncompleteTeamIdx = state.teams.findIndex(t => !t.r3Completed);
+      const competingR1DoneCount = competingTeam.members.filter(m => Boolean(competingTeam.r1PlayerSubmissions[m])).length;
+      const competingR1AllDone = competingR1DoneCount === competingTeam.members.length;
+      const competingR2Done = competingTeam.r2Completed;
+      const competingR3Done = competingTeam.r3Completed;
+
+      // Tentukan ronde berikutnya yang disarankan untuk tim yang dipilih berlomba
+      let recommendedRound = 'round1';
+      let recommendedLabel = `Mulai Ronde 1: Satu Frekuensi (${competingTeam.name})`;
+      if (!competingR1AllDone) {
+        recommendedRound = 'round1';
+        recommendedLabel = competingR1DoneCount > 0
+          ? `Lanjutkan Ronde 1 (${competingR1DoneCount}/${competingTeam.members.length} Selesai)`
+          : `Mulai Ronde 1: Satu Frekuensi (${competingTeam.name})`;
+      } else if (!competingR2Done) {
+        recommendedRound = 'round2';
+        recommendedLabel = `Mulai Ronde 2: Estafet Kata (${competingTeam.name})`;
+      } else if (!competingR3Done) {
+        recommendedRound = 'round3';
+        recommendedLabel = `Mulai Ronde 3: Misi Darurat (${competingTeam.name})`;
+      } else {
+        recommendedRound = 'round1';
+        recommendedLabel = `Mainkan Ulang dari Ronde 1 (${competingTeam.name})`;
+      }
+
+      const teamIdx = state.mode === 'single' ? 0 : (state.selectedPrivateTeamIdx !== null ? state.selectedPrivateTeamIdx : competingIdx);
+      const chosenTeam = state.teams[teamIdx] || competingTeam;
+      const chosenMember = state.selectedPrivateMemberName;
 
       let personalMatchCount = 0;
       const personalHistory = [];
@@ -1817,109 +1875,157 @@
 
       return `
         <div class="space-y-5">
-          <!-- STATUS 3 RONDE & AKSES LANJUT BERMAIN -->
+          <!-- PANEL 1: PILIH TIM YANG AKAN BERLOMBA -->
           <div class="glass-card rounded-3xl p-5 sm:p-6">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
               <div>
-                <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Status Progres 3 Ronde (@30 Detik)</h3>
-                <p class="text-slate-500" style="font-size: 11px;">Peserta yang sudah selesai dapat memantau nilai di bawah, atau lanjutkan ronde berikutnya.</p>
+                <div class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-lg bg-sky-600 text-white flex items-center justify-center">
+                    <i data-lucide="swords" class="w-3.5 h-3.5"></i>
+                  </span>
+                  <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Pilih Tim yang Akan Berlomba</h3>
+                </div>
+                <p class="text-slate-500 mt-0.5" style="font-size: 11px;">Pilih salah satu tim di bawah ini untuk memulai atau melanjutkan lomba per ronde (@30 detik).</p>
               </div>
               <button onclick="goHome()" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
-                Pengaturan Awal
+                Atur Tim &amp; Anggota
               </button>
             </div>
 
+            <!-- Kartu Pilihan Tim -->
+            <div class="grid grid-cols-1 ${state.teams.length > 1 ? 'sm:grid-cols-2' : ''} gap-3 mb-5">
+              ${state.teams.map((t, idx) => {
+                const isSelected = idx === competingIdx;
+                const r1Done = t.members.filter(m => Boolean(t.r1PlayerSubmissions[m])).length;
+                const allDone = r1Done === t.members.length && t.r2Completed && t.r3Completed;
+                return `
+                  <button onclick="selectDashboardCompetingTeam(${idx})"
+                    class="p-4 rounded-2xl border-2 text-left transition relative ${
+                      isSelected
+                        ? 'border-sky-600 bg-sky-50 shadow-md'
+                        : 'border-slate-200 bg-white hover:border-sky-400'
+                    }">
+                    <div class="flex items-start justify-between gap-2 mb-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="px-2 py-0.5 rounded-md font-extrabold text-white flex-shrink-0 ${isSelected ? 'bg-sky-600' : 'bg-slate-700'}" style="font-size: 10px;">
+                          TIM ${idx + 1}
+                        </span>
+                        <span class="font-extrabold text-sm text-slate-900 truncate">${t.name}</span>
+                      </div>
+                      <span class="px-2 py-0.5 rounded-full font-bold flex-shrink-0 ${
+                        allDone
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : isSelected
+                            ? 'bg-sky-600 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                      }" style="font-size: 10px;">
+                        ${allDone ? '✓ Selesai 3 Ronde' : isSelected ? 'Tim Terpilih' : 'Pilih Tim'}
+                      </span>
+                    </div>
+
+                    <p class="text-slate-500 truncate mb-3" style="font-size: 11px;">
+                      Anggota: ${t.members.join(', ')}
+                    </p>
+
+                    <div class="grid grid-cols-3 gap-1.5 text-center">
+                      <div class="py-1 px-1.5 rounded-lg border ${r1Done === t.members.length ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-600'}" style="font-size: 10px;">
+                        <strong>R1:</strong> ${r1Done}/${t.members.length}
+                      </div>
+                      <div class="py-1 px-1.5 rounded-lg border ${t.r2Completed ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-600'}" style="font-size: 10px;">
+                        <strong>R2:</strong> ${t.r2Completed ? 'Selesai' : 'Belum'}
+                      </div>
+                      <div class="py-1 px-1.5 rounded-lg border ${t.r3Completed ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-600'}" style="font-size: 10px;">
+                        <strong>R3:</strong> ${t.r3Completed ? 'Selesai' : 'Belum'}
+                      </div>
+                    </div>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            <!-- Tombol Utama Mulai Berlomba untuk Tim Terpilih -->
+            <div class="p-4 rounded-2xl bg-slate-900 text-white mb-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span class="uppercase tracking-wider text-teal-300 font-bold block" style="font-size: 10px;">Tim Siap Berlomba</span>
+                  <h4 class="text-base sm:text-lg font-extrabold text-white">${competingTeam.name}</h4>
+                  <p class="text-slate-300" style="font-size: 11px;">${competingTeam.members.length} anggota • Durasi 30 detik setiap ronde</p>
+                </div>
+                <button onclick="resumeRoundFromDashboard('${recommendedRound}', ${competingIdx})"
+                  class="w-full sm:w-auto px-5 py-3.5 rounded-xl start-btn-gradient text-white font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-2 shadow-lg">
+                  <i data-lucide="play" class="w-4 h-4"></i>
+                  <span>${recommendedLabel}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Pilihan Ronde Langsung untuk Tim Terpilih -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <!-- Kartu Status Ronde 1 -->
-              <div class="p-3.5 rounded-2xl border ${r1IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-sky-200 bg-sky-50'} flex flex-col justify-between">
+              <div class="p-3.5 rounded-2xl border ${competingR1AllDone ? 'border-emerald-200 bg-emerald-50' : 'border-sky-200 bg-sky-50'} flex flex-col justify-between">
                 <div>
                   <div class="flex items-center justify-between mb-1">
                     <span class="font-extrabold text-xs text-slate-900">Ronde 1 • Frekuensi</span>
-                    <span class="font-bold px-2 py-0.5 rounded ${r1IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'}" style="font-size: 10px;">
-                      ${r1IncompleteTeamIdx === -1 ? '✓ Selesai' : 'Berjalan'}
+                    <span class="font-bold px-2 py-0.5 rounded ${competingR1AllDone ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'}" style="font-size: 10px;">
+                      ${competingR1DoneCount}/${competingTeam.members.length}
                     </span>
                   </div>
                   <p class="text-slate-600 mb-3" style="font-size: 11px;">
-                    ${r1IncompleteTeamIdx === -1 ? 'Semua anggota tim telah menjawab.' : `Giliran ${state.teams[r1IncompleteTeamIdx].name}`}
+                    ${competingTeam.name} • 30 detik/soal
                   </p>
                 </div>
-                ${r1IncompleteTeamIdx !== -1 ? `
-                  <button onclick="resumeRoundFromDashboard('round1', ${r1IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs">
-                    Lanjut Ronde 1 →
-                  </button>
-                ` : ''}
+                <button onclick="resumeRoundFromDashboard('round1', ${competingIdx})" class="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs">
+                  ${competingR1AllDone ? 'Lihat / Ulang R1 →' : 'Main Ronde 1 →'}
+                </button>
               </div>
 
-              <!-- Kartu Status Ronde 2 -->
-              <div class="p-3.5 rounded-2xl border ${r2IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-teal-200 bg-teal-50'} flex flex-col justify-between">
+              <div class="p-3.5 rounded-2xl border ${competingR2Done ? 'border-emerald-200 bg-emerald-50' : 'border-teal-200 bg-teal-50'} flex flex-col justify-between">
                 <div>
                   <div class="flex items-center justify-between mb-1">
                     <span class="font-extrabold text-xs text-slate-900">Ronde 2 • Estafet Kata</span>
-                    <span class="font-bold px-2 py-0.5 rounded ${r2IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-teal-600 text-white'}" style="font-size: 10px;">
-                      ${r2IncompleteTeamIdx === -1 ? '✓ Selesai' : '30 Detik'}
+                    <span class="font-bold px-2 py-0.5 rounded ${competingR2Done ? 'bg-emerald-600 text-white' : 'bg-teal-600 text-white'}" style="font-size: 10px;">
+                      ${competingR2Done ? '✓ Selesai' : '30 Detik'}
                     </span>
                   </div>
                   <p class="text-slate-600 mb-3" style="font-size: 11px;">
-                    ${r2IncompleteTeamIdx === -1 ? 'Semua tim sudah estafet kata.' : `Siap untuk ${state.teams[r2IncompleteTeamIdx].name}`}
+                    ${competingTeam.name} • Tebak istilah
                   </p>
                 </div>
-                ${r2IncompleteTeamIdx !== -1 ? `
-                  <button onclick="resumeRoundFromDashboard('round2', ${r2IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs">
-                    Main Ronde 2 →
-                  </button>
-                ` : ''}
+                <button onclick="resumeRoundFromDashboard('round2', ${competingIdx})" class="w-full py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs">
+                  ${competingR2Done ? 'Ulang Ronde 2 →' : 'Main Ronde 2 →'}
+                </button>
               </div>
 
-              <!-- Kartu Status Ronde 3 -->
-              <div class="p-3.5 rounded-2xl border ${r3IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-indigo-200 bg-indigo-50'} flex flex-col justify-between">
+              <div class="p-3.5 rounded-2xl border ${competingR3Done ? 'border-emerald-200 bg-emerald-50' : 'border-indigo-200 bg-indigo-50'} flex flex-col justify-between">
                 <div>
                   <div class="flex items-center justify-between mb-1">
                     <span class="font-extrabold text-xs text-slate-900">Ronde 3 • Misi Darurat</span>
-                    <span class="font-bold px-2 py-0.5 rounded ${r3IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}" style="font-size: 10px;">
-                      ${r3IncompleteTeamIdx === -1 ? '✓ Selesai' : '30 Detik'}
+                    <span class="font-bold px-2 py-0.5 rounded ${competingR3Done ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}" style="font-size: 10px;">
+                      ${competingR3Done ? '✓ Selesai' : '30 Detik'}
                     </span>
                   </div>
                   <p class="text-slate-600 mb-3" style="font-size: 11px;">
-                    ${r3IncompleteTeamIdx === -1 ? 'Semua studi kasus selesai.' : `Siap untuk ${state.teams[r3IncompleteTeamIdx].name}`}
+                    ${competingTeam.name} • 3 studi kasus
                   </p>
                 </div>
-                ${r3IncompleteTeamIdx !== -1 ? `
-                  <button onclick="resumeRoundFromDashboard('round3', ${r3IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs">
-                    Main Ronde 3 →
-                  </button>
-                ` : ''}
+                <button onclick="resumeRoundFromDashboard('round3', ${competingIdx})" class="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs">
+                  ${competingR3Done ? 'Ulang Ronde 3 →' : 'Main Ronde 3 →'}
+                </button>
               </div>
             </div>
           </div>
 
-          <!-- KARTU HASIL & NILAI PRIBADI PEMAIN -->
+          <!-- PANEL 2: KARTU HASIL & NILAI PRIBADI PEMAIN -->
           <div class="glass-card rounded-3xl p-5 sm:p-8 text-center">
             ${syncBanner}
-            <h2 class="text-xl sm:text-3xl font-extrabold text-slate-900 mb-2">Dashboard Nilai &amp; Hasil Anda</h2>
+            <h2 class="text-xl sm:text-3xl font-extrabold text-slate-900 mb-2">Dashboard Nilai &amp; Hasil Pribadi</h2>
             <p class="text-xs sm:text-sm text-slate-600 max-w-xl mx-auto mb-6">
-              ${state.mode === 'multi'
-                ? 'Pilih <strong>tim Anda</strong> lalu klik <strong>nama Anda sendiri</strong> untuk melihat rincian hasil dan jawaban Anda.'
-                : 'Klik <strong>nama Anda sendiri</strong> di bawah ini untuk melihat rincian hasil dan jawaban Anda.'}
+              Pilih <strong>nama Anda sendiri</strong> pada tim <strong>${chosenTeam.name}</strong> di bawah ini untuk melihat rincian hasil dan jawaban Anda.
             </p>
-
-            ${state.mode === 'multi' ? `
-              <div class="mb-5">
-                <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">1. Pilih Tim Anda:</p>
-                <div class="flex flex-wrap justify-center gap-2">
-                  ${state.teams.map((t, idx) => `
-                    <button onclick="selectPrivateTeam(${idx})"
-                      class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${teamIdx === idx ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}">
-                      ${t.name}
-                    </button>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
 
             ${chosenTeam ? `
               <div class="mb-8">
                 <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">
-                  ${state.mode === 'multi' ? `2. Pilih Nama Anda (${chosenTeam.name}):` : 'Pilih Nama Anda:'}
+                  Pilih Nama Anda (${chosenTeam.name}):
                 </p>
                 <div class="flex flex-wrap justify-center gap-2">
                   ${chosenTeam.members.map(m => {
@@ -1988,15 +2094,13 @@
                   </div>
                 ` : `
                   <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
-                    <strong>${chosenMember}</strong> belum menyelesaikan jawaban Ronde 1. Klik tombol <strong>Lanjut Ronde 1</strong> di atas untuk mulai menjawab.
+                    <strong>${chosenMember}</strong> belum menyelesaikan jawaban Ronde 1. Klik tombol <strong>Main Ronde 1</strong> di atas untuk mulai menjawab.
                   </div>
                 `}
               </div>
             ` : `
               <div class="max-w-md mx-auto p-6 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs mb-6">
-                ${!chosenTeam
-                  ? 'Silakan pilih tim Anda terlebih dahulu, lalu pilih nama Anda sendiri.'
-                  : 'Silakan klik nama Anda sendiri di atas untuk menampilkan kartu nilai pribadi Anda.'}
+                Silakan klik nama Anda sendiri di atas untuk menampilkan kartu nilai pribadi Anda.
               </div>
             `}
 
