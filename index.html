@@ -63,10 +63,10 @@
     }
     @keyframes pulse-fast {
       0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
+      50% { transform: scale(1.06); }
     }
     .animate-pulse-fast {
-      animation: pulse-fast 0.8s infinite;
+      animation: pulse-fast 0.75s infinite;
     }
 
     /* Utilitas Warna Lengkap */
@@ -148,6 +148,7 @@
     .border-amber-500 { border-color: #f59e0b; }
     .border-amber-200 { border-color: #fde68a; }
 
+    .bg-rose-600 { background-color: #e11d48; }
     .bg-rose-100 { background-color: #ffe4e6; }
     .bg-rose-50 { background-color: #fff1f2; }
     .hover\:bg-rose-50:hover { background-color: #fff1f2; }
@@ -155,6 +156,7 @@
     .text-rose-500 { color: #f43f5e; }
     .text-rose-400 { color: #fb7185; }
     .text-rose-200 { color: #fecdd3; }
+    .border-rose-300 { border-color: #fda4af; }
 
     .bg-indigo-600 { background-color: #4f46e5; }
     .bg-indigo-100 { background-color: #e0e7ff; }
@@ -229,9 +231,15 @@
         <button id="soundToggleBtn" onclick="toggleSound()" title="Suara Efek" class="p-2 sm:p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition">
           <i id="soundIcon" data-lucide="volume-2" class="w-4 h-4"></i>
         </button>
+
+        <button onclick="openDashboardScreen()" title="Menu Dashboard" class="flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-extrabold transition">
+          <i data-lucide="layout-dashboard" class="w-4 h-4 text-sky-600"></i>
+          <span>Dashboard</span>
+        </button>
+
         <button onclick="openAdminModal()" class="flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition">
           <i data-lucide="shield-check" class="w-4 h-4 text-teal-400"></i>
-          <span>Admin</span>
+          <span class="hidden sm:inline">Admin</span>
         </button>
       </div>
     </div>
@@ -352,6 +360,8 @@
     // ==========================================
     // 2. BANK SOAL & DATA GAME YANKES BADUNG
     // ==========================================
+    const ROUND_DURATION_SECONDS = 30; // Waktu menjawab 30 detik di setiap ronde
+
     const ROUND1_QUESTIONS = [
       {
         q: "Kalau rapat evaluasi pelayanan mendadak molor lewat jam makan siang, menu penyelamat paling kompak tim kita adalah...",
@@ -423,7 +433,7 @@
     // ==========================================
     // 3. STATE MANAGEMENT & SUPABASE + LOCAL STORAGE
     // ==========================================
-    const STORAGE_KEY = 'yankes_badung_game_history_v5';
+    const STORAGE_KEY = 'yankes_badung_game_history_v6';
     const TEAMS_CONFIG_KEY = 'yankes_badung_teams_config_v1';
     const ADMIN_PIN = '1234';
 
@@ -440,8 +450,10 @@
         r2Words: 0,
         r2Points: 0,
         r2Speaker: '-',
+        r2Completed: false,
         r3Score: 0,
-        r3Details: []
+        r3Details: [],
+        r3Completed: false
       };
     }
 
@@ -512,31 +524,39 @@
     }
 
     let state = {
-      screen: 'setup',
+      screen: 'setup', // 'setup' | 'round1' | 'round2' | 'round3' | 'summary' (Menu Dashboard)
       mode: 'multi',
       teams: loadLocalTeams('multi'),
       newMemberDrafts: {},
       activeTeamIdx: 0,
+      // Round 1 (30 detik per pertanyaan)
       r1SelectedMember: null,
       r1PlayerQIdx: 0,
       r1TempAnswers: [],
       r1LastSelectedOpt: null,
       r1PlayerDoneBanner: null,
+      r1Timer: ROUND_DURATION_SECONDS,
+      r1Interval: null,
+      // Round 2 (30 detik per giliran estafet kata)
       r2SelectedSpeaker: null,
-      r2Timer: 60,
+      r2Timer: ROUND_DURATION_SECONDS,
       r2Interval: null,
       r2WordIdx: 0,
       r2Running: false,
       r2SessionScore: 0,
       r2CorrectCount: 0,
+      // Round 3 (30 detik per studi kasus)
       r3SelectedDecisionMaker: null,
       r3Idx: 0,
-      r3Timer: 15,
+      r3Timer: ROUND_DURATION_SECONDS,
       r3Interval: null,
       r3SelectedOption: null,
+      // Menu Dashboard State
       selectedPrivateTeamIdx: null,
       selectedPrivateMemberName: null,
+      sessionSavedOnce: false,
       saveStatus: 'idle',
+      // Admin state
       adminLoggedIn: false,
       adminLoading: false,
       adminHistoryCache: [],
@@ -578,6 +598,8 @@
     }
 
     async function saveSessionToDatabase() {
+      if (state.sessionSavedOnce) return;
+      state.sessionSavedOnce = true;
       state.saveStatus = 'saving';
       render();
 
@@ -643,6 +665,7 @@
     }
 
     function clearTimers() {
+      if (state.r1Interval) { clearInterval(state.r1Interval); state.r1Interval = null; }
       if (state.r2Interval) { clearInterval(state.r2Interval); state.r2Interval = null; }
       if (state.r3Interval) { clearInterval(state.r3Interval); state.r3Interval = null; }
     }
@@ -655,8 +678,55 @@
       render();
     }
 
+    // Navigasi langsung ke Menu Dashboard (bisa dipanggil setelah nama selesai menjawab atau dari header)
+    async function openDashboardScreen(preselectTeamIdx = null, preselectMember = null) {
+      clearTimers();
+      if (preselectTeamIdx !== null) {
+        state.selectedPrivateTeamIdx = preselectTeamIdx;
+      } else if (state.selectedPrivateTeamIdx === null) {
+        state.selectedPrivateTeamIdx = state.activeTeamIdx;
+      }
+      if (preselectMember) {
+        state.selectedPrivateMemberName = preselectMember;
+      }
+      state.screen = 'summary';
+      render();
+
+      // Jika seluruh tim telah selesai semua ronde, simpan ke Supabase otomatis
+      const allRoundsDone = state.teams.every(t =>
+        t.members.every(m => Boolean(t.r1PlayerSubmissions[m])) && t.r2Completed && t.r3Completed
+      );
+      if (allRoundsDone && !state.sessionSavedOnce) {
+        await saveSessionToDatabase();
+      }
+    }
+
+    function resumeRoundFromDashboard(roundScreen, teamIdx = 0) {
+      clearTimers();
+      state.activeTeamIdx = teamIdx;
+      if (roundScreen === 'round1') {
+        state.r1SelectedMember = null;
+        state.r1PlayerQIdx = 0;
+        state.r1TempAnswers = [];
+        state.r1LastSelectedOpt = null;
+      } else if (roundScreen === 'round2') {
+        state.r2SelectedSpeaker = null;
+        state.r2Timer = ROUND_DURATION_SECONDS;
+        state.r2Running = false;
+        state.r2SessionScore = 0;
+        state.r2CorrectCount = 0;
+      } else if (roundScreen === 'round3') {
+        state.r3SelectedDecisionMaker = null;
+        state.r3Idx = 0;
+        state.r3SelectedOption = null;
+        state.r3Timer = ROUND_DURATION_SECONDS;
+      }
+      state.screen = roundScreen;
+      render();
+    }
+
     // ==========================================
-    // 4. SCREEN RENDERERS (TAMPILAN AWAL BARU)
+    // 4. SCREEN RENDERERS (TAMPILAN AWAL)
     // ==========================================
     function render() {
       const app = document.getElementById('app');
@@ -689,7 +759,7 @@
               <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-teal-300 font-bold border border-teal-400" style="background: rgba(13, 148, 136, 0.25); font-size: 11px;">
                   <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-                  <span>ICE BREAKING &amp; TEAM SYNERGY</span>
+                  <span>KOMPETISI 3 RONDE • TIMER 30 DETIK</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sky-200 font-semibold" style="background: rgba(255, 255, 255, 0.1); font-size: 11px;">
                   <i data-lucide="users" class="w-3.5 h-3.5 text-sky-300"></i>
@@ -701,44 +771,56 @@
                 Uji Kekompakan &amp; <span class="text-teal-300">Satu Frekuensi</span> Tim Yankes
               </h1>
               <p class="text-xs sm:text-sm text-sky-100 mt-2.5 max-w-2xl leading-relaxed">
-                Bangun sinergi Bidang Pelayanan Kesehatan Dinas Kesehatan Kabupaten Badung lewat 3 tantangan interaktif langsung dari genggaman HP Anda.
+                Kompetisi antar tim Bidang Pelayanan Kesehatan Dinkes Badung dalam <strong>3 ronde</strong> berdurasi <strong>30 detik</strong>. Setiap nama yang selesai menjawab dapat langsung beralih ke <strong>Menu Dashboard</strong>.
               </p>
 
-              <!-- 3 KARTU RINGKASAN RONDE -->
+              <!-- 3 KARTU RINGKASAN RONDE (MASING-MASING 30 DETIK) -->
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mt-6">
                 <div class="p-3.5 rounded-2xl border" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14);">
-                  <div class="flex items-center gap-2.5 mb-1.5">
-                    <div class="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center flex-shrink-0">
-                      <i data-lucide="radio" class="w-4 h-4"></i>
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <div class="flex items-center gap-2">
+                      <div class="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="radio" class="w-4 h-4"></i>
+                      </div>
+                      <span class="font-extrabold text-xs text-white">Ronde 1</span>
                     </div>
-                    <span class="font-extrabold text-xs text-white">Ronde 1 • Satu Frekuensi</span>
+                    <span class="px-2 py-0.5 rounded bg-sky-600 text-white font-bold" style="font-size: 10px;">30 Detik/Soal</span>
                   </div>
+                  <p class="font-bold text-xs text-white mb-0.5">Satu Frekuensi</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Jawab 5 kebiasaan kerja tim secara rahasia per anggota.
+                    Jawab 5 pertanyaan kebiasaan kerja tim dalam waktu 30 detik per soal.
                   </p>
                 </div>
 
                 <div class="p-3.5 rounded-2xl border" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14);">
-                  <div class="flex items-center gap-2.5 mb-1.5">
-                    <div class="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center flex-shrink-0">
-                      <i data-lucide="timer" class="w-4 h-4"></i>
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <div class="flex items-center gap-2">
+                      <div class="w-7 h-7 rounded-lg bg-teal-600 text-white flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="timer" class="w-4 h-4"></i>
+                      </div>
+                      <span class="font-extrabold text-xs text-white">Ronde 2</span>
                     </div>
-                    <span class="font-extrabold text-xs text-white">Ronde 2 • Estafet Kata</span>
+                    <span class="px-2 py-0.5 rounded bg-teal-600 text-white font-bold" style="font-size: 10px;">30 Detik</span>
                   </div>
+                  <p class="font-bold text-xs text-white mb-0.5">Estafet Kata Kunci</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Tebak istilah layanan kesehatan dalam 60 detik tanpa kata tabu.
+                    Tebak istilah layanan kesehatan sebanyak mungkin dalam 30 detik.
                   </p>
                 </div>
 
                 <div class="p-3.5 rounded-2xl border" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14);">
-                  <div class="flex items-center gap-2.5 mb-1.5">
-                    <div class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
-                      <i data-lucide="zap" class="w-4 h-4"></i>
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <div class="flex items-center gap-2">
+                      <div class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+                        <i data-lucide="zap" class="w-4 h-4"></i>
+                      </div>
+                      <span class="font-extrabold text-xs text-white">Ronde 3</span>
                     </div>
-                    <span class="font-extrabold text-xs text-white">Ronde 3 • Misi Darurat</span>
+                    <span class="px-2 py-0.5 rounded bg-indigo-600 text-white font-bold" style="font-size: 10px;">30 Detik/Kasus</span>
                   </div>
+                  <p class="font-bold text-xs text-white mb-0.5">Misi Darurat</p>
                   <p class="text-sky-200 leading-snug" style="font-size: 11px;">
-                    Ambil keputusan cepat &amp; solutif pada 3 studi kasus lapangan.
+                    Selesaikan 3 studi kasus pelayanan dalam waktu 30 detik per kasus.
                   </p>
                 </div>
               </div>
@@ -747,7 +829,6 @@
 
           <!-- PANEL KONFIGURASI MODE & TIM -->
           <div class="glass-card rounded-3xl p-5 sm:p-7">
-            <!-- Langkah 1: Pilih Mode -->
             <div class="mb-6">
               <div class="flex items-center gap-2 mb-3">
                 <span class="w-6 h-6 rounded-lg bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center">1</span>
@@ -763,7 +844,7 @@
                       </div>
                       <div>
                         <span class="font-extrabold text-sm text-slate-900 block">Kompetisi Antar Tim</span>
-                        <span class="font-semibold text-sky-700" style="font-size: 11px;">2 sampai 4 Tim • Adu Kompak</span>
+                        <span class="font-semibold text-sky-700" style="font-size: 11px;">2–4 Tim • 3 Ronde @30 Detik</span>
                       </div>
                     </div>
                     <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${state.mode === 'multi' ? 'bg-sky-600 text-white' : 'border-2 border-slate-300'}">
@@ -771,7 +852,7 @@
                     </div>
                   </div>
                   <p class="text-xs text-slate-500 mt-2.5 leading-relaxed">
-                    Cocok untuk membagi staf menjadi beberapa kelompok kecil yang bermain bergiliran.
+                    Tiap tim bersaing dalam 3 ronde berwaktu 30 detik dan anggota yang selesai langsung masuk ke Menu Dashboard.
                   </p>
                 </button>
 
@@ -783,7 +864,7 @@
                       </div>
                       <div>
                         <span class="font-extrabold text-sm text-slate-900 block">Mode 1 Tim Besar</span>
-                        <span class="font-semibold text-teal-700" style="font-size: 11px;">Satu Kesatuan • Cek Frekuensi</span>
+                        <span class="font-semibold text-teal-700" style="font-size: 11px;">Satu Kesatuan • 3 Ronde @30 Detik</span>
                       </div>
                     </div>
                     <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${state.mode === 'single' ? 'bg-teal-600 text-white' : 'border-2 border-slate-300'}">
@@ -791,7 +872,7 @@
                     </div>
                   </div>
                   <p class="text-xs text-slate-500 mt-2.5 leading-relaxed">
-                    Seluruh peserta bergabung dalam 1 tim besar untuk mengukur kekompakan bersama.
+                    Seluruh peserta tergabung dalam 1 tim besar untuk mengukur keselarasan bersama.
                   </p>
                 </button>
               </div>
@@ -872,16 +953,11 @@
               </div>
             </div>
 
-            <!-- TOMBOL MULAI PERMAINAN -->
             <button onclick="startGame()" class="w-full py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-base flex items-center justify-center gap-2.5 cursor-pointer">
               <i data-lucide="rocket" class="w-5 h-5"></i>
-              <span>Mulai Permainan Sekarang</span>
+              <span>Mulai Kompetisi 3 Ronde (@30 Detik)</span>
               <i data-lucide="arrow-right" class="w-5 h-5"></i>
             </button>
-
-            <p class="text-center text-slate-400 mt-3" style="font-size: 11px;">
-              Tips: Pastikan setiap peserta memilih namanya sendiri saat giliran bermain di HP.
-            </p>
           </div>
         </div>
       `;
@@ -946,8 +1022,10 @@
         t.r2Words = 0;
         t.r2Points = 0;
         t.r2Speaker = '-';
+        t.r2Completed = false;
         t.r3Score = 0;
         t.r3Details = [];
+        t.r3Completed = false;
       });
       state.activeTeamIdx = 0;
       state.r1SelectedMember = null;
@@ -955,16 +1033,37 @@
       state.r1TempAnswers = [];
       state.r1LastSelectedOpt = null;
       state.r1PlayerDoneBanner = null;
+      state.r1Timer = ROUND_DURATION_SECONDS;
       state.selectedPrivateTeamIdx = null;
       state.selectedPrivateMemberName = null;
+      state.sessionSavedOnce = false;
       state.saveStatus = 'idle';
       state.screen = 'round1';
       render();
     }
 
     // ==========================================
-    // RONDE 1: SATU FREKUENSI
+    // RONDE 1: SATU FREKUENSI (30 DETIK / PERTANYAAN)
     // ==========================================
+    function startR1QuestionTimer() {
+      clearTimers();
+      state.r1Timer = ROUND_DURATION_SECONDS;
+      state.r1Interval = setInterval(() => {
+        state.r1Timer--;
+        if (state.r1Timer <= 5 && state.r1Timer > 0) playTick(true);
+        if (state.r1Timer <= 0) {
+          clearTimers();
+          // Jika waktu 30 detik habis, pilih opsi yang sedang disorot atau default opsi ke-0 lalu lanjut
+          if (state.r1LastSelectedOpt === null) {
+            state.r1LastSelectedOpt = 0;
+          }
+          advanceR1PlayerQuestion(true);
+          return;
+        }
+        render();
+      }, 1000);
+    }
+
     function selectR1Member(memberName) {
       const team = state.teams[state.activeTeamIdx];
       if (team.r1PlayerSubmissions[memberName]) return;
@@ -974,10 +1073,12 @@
       state.r1TempAnswers = [];
       state.r1LastSelectedOpt = null;
       state.r1PlayerDoneBanner = null;
+      startR1QuestionTimer();
       render();
     }
 
     function cancelR1MemberSelection() {
+      clearTimers();
       state.r1SelectedMember = null;
       state.r1PlayerQIdx = 0;
       state.r1TempAnswers = [];
@@ -991,8 +1092,9 @@
       render();
     }
 
-    function advanceR1PlayerQuestion() {
+    function advanceR1PlayerQuestion(isAutoTimeout = false) {
       if (state.r1LastSelectedOpt === null || !state.r1SelectedMember) return;
+      clearTimers();
       const team = state.teams[state.activeTeamIdx];
       const question = ROUND1_QUESTIONS[state.r1PlayerQIdx];
       const chosenText = question.options[state.r1LastSelectedOpt];
@@ -1001,12 +1103,15 @@
       state.r1LastSelectedOpt = null;
 
       if (state.r1PlayerQIdx + 1 < ROUND1_QUESTIONS.length) {
-        playTone(680, 'triangle', 0.1, 0.12);
+        if (!isAutoTimeout) playTone(680, 'triangle', 0.1, 0.12);
+        else playError();
         state.r1PlayerQIdx++;
+        startR1QuestionTimer();
         render();
         return;
       }
 
+      // Semua 5 pertanyaan selesai dijawab oleh pemain ini
       const finishedPlayer = state.r1SelectedMember;
       team.r1PlayerSubmissions[finishedPlayer] = [...state.r1TempAnswers];
       state.r1SelectedMember = null;
@@ -1015,18 +1120,22 @@
       state.r1PlayerDoneBanner = finishedPlayer;
       playSuccess();
 
-      const allMembersDone = team.members.every(m => Boolean(team.r1PlayerSubmissions[m]));
-      if (allMembersDone) {
-        finalizeTeamRound1(team);
-      }
+      // Hitung sementara atau final tim
+      recalculateTeamRound1(team);
       render();
     }
 
-    function finalizeTeamRound1(team) {
+    function recalculateTeamRound1(team) {
+      const submittedMembers = team.members.filter(m => Boolean(team.r1PlayerSubmissions[m]));
+      if (submittedMembers.length === 0) return;
+
+      // Kurangi poin R1 lama sebelum hitung ulang
+      team.score -= team.r1Points;
       team.r1Details = [];
       let totalPoints = 0;
+
       ROUND1_QUESTIONS.forEach((qObj, qIdx) => {
-        const answersForQ = team.members.map(m => ({
+        const answersForQ = submittedMembers.map(m => ({
           member: m,
           answer: team.r1PlayerSubmissions[m][qIdx]
         }));
@@ -1053,6 +1162,7 @@
     }
 
     function proceedAfterTeamRound1() {
+      clearTimers();
       state.r1PlayerDoneBanner = null;
       state.r1SelectedMember = null;
       state.r1PlayerQIdx = 0;
@@ -1064,7 +1174,7 @@
       } else {
         state.activeTeamIdx = 0;
         state.r2SelectedSpeaker = null;
-        state.r2Timer = 60;
+        state.r2Timer = ROUND_DURATION_SECONDS;
         state.r2Running = false;
         state.r2SessionScore = 0;
         state.r2CorrectCount = 0;
@@ -1080,10 +1190,11 @@
       const allMembersDone = completedMembers.length === team.members.length;
       const hasMoreTeams = state.mode === 'multi' && state.activeTeamIdx + 1 < state.teams.length;
 
+      // TAMPILAN 1: Seluruh anggota tim sudah selesai
       if (allMembersDone) {
         return `
           <div class="space-y-4">
-            ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi', 'Seluruh anggota tim telah menyelesaikan semua pertanyaan.')}
+            ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi (30 Detik/Soal)', 'Seluruh anggota tim telah menyelesaikan semua pertanyaan.')}
 
             <div class="glass-card rounded-3xl p-6 sm:p-8 text-center">
               <div class="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-3">
@@ -1096,22 +1207,30 @@
                 Semua Anggota ${team.name} Sudah Menjawab!
               </h3>
               <p class="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mb-6">
-                Seluruh jawaban rahasia untuk ${totalQ} pertanyaan telah tercatat. Skor kekompakan tim Anda: <strong class="text-sky-700">${team.r1Harmony}% (+${team.r1Points} Poin)</strong>.
+                Skor kekompakan Ronde 1 tim Anda: <strong class="text-sky-700">${team.r1Harmony}% (+${team.r1Points} Poin)</strong>.
               </p>
 
-              <button onclick="proceedAfterTeamRound1()" class="w-full py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg transition">
-                <span>${hasMoreTeams ? `Lanjut ke Giliran ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 2: Estafet Kata Kunci'}</span>
-                <i data-lucide="arrow-right" class="w-5 h-5"></i>
-              </button>
+              <div class="space-y-2.5">
+                <button onclick="openDashboardScreen(${state.activeTeamIdx}, '${(state.r1PlayerDoneBanner || team.members[0]).replace(/'/g, "\\'")}')" class="w-full py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg transition">
+                  <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+                  <span>Ke Menu Dashboard Hasil</span>
+                </button>
+
+                <button onclick="proceedAfterTeamRound1()" class="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition">
+                  <span>${hasMoreTeams ? `Lanjut ke Giliran ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 2: Estafet Kata (30 Detik)'}</span>
+                  <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </button>
+              </div>
             </div>
           </div>
         `;
       }
 
+      // TAMPILAN 2: Daftar nama anggota tim (Pemain yang baru selesai mendapat tombol langsung ke Menu Dashboard)
       if (!state.r1SelectedMember) {
         return `
           <div class="space-y-4">
-            ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi', 'Pilih nama Anda di HP, lalu jawab 5 pertanyaan beruntun hingga selesai.')}
+            ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi (30 Detik/Soal)', 'Pilih nama Anda, jawab 5 pertanyaan (30 detik/soal), lalu lanjut ke Menu Dashboard.')}
 
             <div class="glass-card rounded-3xl p-5 sm:p-8">
               <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -1124,9 +1243,18 @@
               </div>
 
               ${state.r1PlayerDoneBanner ? `
-                <div class="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs sm:text-sm font-semibold mb-5 flex items-center gap-2.5">
-                  <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600 flex-shrink-0"></i>
-                  <span>Jawaban <strong>${state.r1PlayerDoneBanner}</strong> (${totalQ} pertanyaan) tersimpan! Silakan serahkan HP ke anggota berikutnya.</span>
+                <div class="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-200 text-emerald-900 mb-5">
+                  <div class="flex items-center gap-2.5 text-xs sm:text-sm font-bold mb-3">
+                    <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600 flex-shrink-0"></i>
+                    <span>Terima kasih <strong>${state.r1PlayerDoneBanner}</strong>! Seluruh jawaban Anda telah tersimpan.</span>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button onclick="openDashboardScreen(${state.activeTeamIdx}, '${state.r1PlayerDoneBanner.replace(/'/g, "\\'")}')"
+                      class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm transition">
+                      <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                      <span>Buka Menu Dashboard (${state.r1PlayerDoneBanner})</span>
+                    </button>
+                  </div>
                 </div>
               ` : ''}
 
@@ -1134,29 +1262,32 @@
                 Pilih Nama Anda (${team.name})
               </h3>
               <p class="text-xs text-slate-600 mb-5">
-                Klik <strong>nama Anda sendiri</strong> di bawah ini. Anda akan menjawab <strong>${totalQ} pertanyaan</strong> secara beruntun di HP Anda sebelum berganti ke rekan berikutnya.
+                Klik <strong>nama Anda sendiri</strong> di bawah ini (waktu menjawab <strong>30 detik per pertanyaan</strong>). Setelah selesai, Anda dapat langsung menuju <strong>Menu Dashboard</strong>.
               </p>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 ${team.members.map(member => {
                   const isDone = Boolean(team.r1PlayerSubmissions[member]);
                   return `
-                    <button ${isDone ? 'disabled' : ''} onclick="selectR1Member('${member.replace(/'/g, "\\'")}')"
+                    <button onclick="${isDone ? `openDashboardScreen(${state.activeTeamIdx}, '${member.replace(/'/g, "\\'")}')` : `selectR1Member('${member.replace(/'/g, "\\'")}')`}"
                       class="p-4 rounded-2xl border-2 text-left transition flex items-center justify-between ${
                         isDone
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 cursor-default'
+                          ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-900'
                           : 'border-slate-200 bg-white hover:border-sky-600 hover:bg-sky-50 text-slate-900 shadow-sm'
                       }">
                       <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-xl ${isDone ? 'bg-emerald-500 text-white' : 'bg-sky-100 text-sky-700'} font-bold text-sm flex items-center justify-center">
+                        <div class="w-9 h-9 rounded-xl ${isDone ? 'bg-emerald-600 text-white' : 'bg-sky-100 text-sky-700'} font-bold text-sm flex items-center justify-center">
                           ${member.charAt(0).toUpperCase()}
                         </div>
-                        <span class="font-bold text-sm sm:text-base">${member}</span>
+                        <div>
+                          <span class="font-bold text-sm sm:text-base block">${member}</span>
+                          ${isDone ? `<span class="text-emerald-700 font-semibold" style="font-size: 10px;">Klik untuk ke Dashboard</span>` : ''}
+                        </div>
                       </div>
                       <span class="font-bold px-2.5 py-1 rounded-lg ${
-                        isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-600 text-white'
+                        isDone ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'
                       }" style="font-size: 11px;">
-                        ${isDone ? '✓ Selesai' : 'Mulai Jawab'}
+                        ${isDone ? 'Dashboard →' : 'Mulai (30d)'}
                       </span>
                     </button>
                   `;
@@ -1167,16 +1298,17 @@
         `;
       }
 
+      // TAMPILAN 3: Pemain aktif sedang menjawab Pertanyaan 1..5 (Timer 30 detik/soal)
       const question = ROUND1_QUESTIONS[state.r1PlayerQIdx];
       const hasNextQ = state.r1PlayerQIdx + 1 < totalQ;
       const progressPct = Math.round(((state.r1PlayerQIdx + 1) / totalQ) * 100);
 
       return `
         <div class="space-y-4">
-          ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi', 'Isi jawaban lalu tekan tombol lanjut ke pertanyaan berikutnya.')}
+          ${renderPrivateScoreBar('Ronde 1: Satu Frekuensi', 'Waktu menjawab 30 detik per pertanyaan.')}
 
           <div class="glass-card rounded-3xl p-5 sm:p-8">
-            <div class="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 mb-5 flex items-center justify-between gap-2">
+            <div class="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 mb-4 flex items-center justify-between gap-2">
               <div class="flex items-center gap-2.5 min-w-0">
                 <div class="w-9 h-9 rounded-full bg-amber-500 text-white font-bold flex items-center justify-center flex-shrink-0">
                   ${state.r1SelectedMember.charAt(0).toUpperCase()}
@@ -1186,9 +1318,16 @@
                   <p class="text-sm sm:text-base font-extrabold text-slate-900 truncate">${state.r1SelectedMember}</p>
                 </div>
               </div>
-              <button onclick="cancelR1MemberSelection()" class="text-xs font-bold text-amber-800 hover:underline bg-amber-100 px-3 py-1.5 rounded-lg flex-shrink-0">
-                Ganti Nama
-              </button>
+
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-extrabold text-xs ${state.r1Timer <= 7 ? 'bg-rose-600 text-white animate-pulse-fast' : 'bg-slate-900 text-teal-300'}">
+                  <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                  <span>${state.r1Timer} Detik</span>
+                </div>
+                <button onclick="cancelR1MemberSelection()" class="text-xs font-bold text-amber-800 hover:underline bg-amber-100 px-2.5 py-1.5 rounded-lg">
+                  Batal
+                </button>
+              </div>
             </div>
 
             <div class="mb-5">
@@ -1229,7 +1368,7 @@
               }).join('')}
             </div>
 
-            <button ${state.r1LastSelectedOpt === null ? 'disabled' : ''} onclick="advanceR1PlayerQuestion()"
+            <button ${state.r1LastSelectedOpt === null ? 'disabled' : ''} onclick="advanceR1PlayerQuestion(false)"
               class="w-full py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md transition"
               style="${state.r1LastSelectedOpt === null ? 'opacity:0.4; cursor:not-allowed;' : ''}">
               <span>
@@ -1237,7 +1376,7 @@
                   ? 'Pilih Jawaban Terlebih Dahulu'
                   : hasNextQ
                     ? `Lanjut ke Pertanyaan Berikutnya (${state.r1PlayerQIdx + 2} dari ${totalQ})`
-                    : `Simpan Jawaban ${state.r1SelectedMember} & Selesai`}
+                    : `Selesai & Simpan Jawaban (${state.r1SelectedMember})`}
               </span>
               <i data-lucide="arrow-right" class="w-4 h-4"></i>
             </button>
@@ -1247,7 +1386,7 @@
     }
 
     // ==========================================
-    // RONDE 2: ESTAFET KATA KUNCI
+    // RONDE 2: ESTAFET KATA KUNCI (30 DETIK)
     // ==========================================
     function selectR2Speaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -1262,27 +1401,27 @@
 
       return `
         <div class="space-y-4">
-          ${renderPrivateScoreBar('Ronde 2: Estafet Kata Kunci', 'Pilih nama pemandu kata dari anggota tim, lalu jelaskan kata utama dalam 60 detik!')}
+          ${renderPrivateScoreBar('Ronde 2: Estafet Kata Kunci (30 Detik)', 'Pilih nama pemandu kata dari anggota tim, lalu jelaskan kata utama dalam 30 detik!')}
 
           <div class="glass-card rounded-3xl p-5 sm:p-8 text-center">
             <div class="flex items-center justify-between mb-6">
               <span class="px-3 py-1 rounded-full bg-teal-100 text-teal-800 text-xs font-bold">
                 Tim Bermain: ${team.name}
               </span>
-              <div class="flex items-center gap-2 px-4 py-1.5 rounded-full font-extrabold text-sm ${state.r2Timer <= 10 ? 'bg-rose-100 text-rose-600 animate-pulse-fast' : 'bg-slate-100 text-slate-800'}">
+              <div class="flex items-center gap-2 px-4 py-1.5 rounded-full font-extrabold text-sm ${state.r2Timer <= 7 ? 'bg-rose-600 text-white animate-pulse-fast' : 'bg-slate-100 text-slate-800'}">
                 <i data-lucide="timer" class="w-4 h-4"></i>
                 <span>${state.r2Timer} Detik</span>
               </div>
             </div>
 
-            ${!state.r2Running && state.r2Timer === 60 ? `
+            ${!state.r2Running && state.r2Timer === ROUND_DURATION_SECONDS ? `
               <div class="py-4 max-w-lg mx-auto">
                 <div class="w-14 h-14 rounded-2xl bg-teal-100 text-teal-600 flex items-center justify-center mx-auto mb-3">
                   <i data-lucide="message-square-quote" class="w-7 h-7"></i>
                 </div>
                 <h3 class="text-xl font-extrabold text-slate-900 mb-1">Siapa Juru Bicara dari ${team.name}?</h3>
                 <p class="text-xs text-slate-600 mb-5">
-                  Pilih <strong>nama Anda sendiri</strong> di bawah ini sebagai pemandu kata kunci yang akan melihat layar HP selama <strong>60 detik</strong>.
+                  Pilih <strong>nama Anda sendiri</strong> di bawah ini sebagai pemandu kata kunci selama <strong>30 detik</strong>.
                 </p>
 
                 <div class="flex flex-wrap justify-center gap-2 mb-6">
@@ -1300,7 +1439,7 @@
 
                 <button ${!state.r2SelectedSpeaker ? 'disabled' : ''} onclick="startR2Timer()"
                   class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-sm shadow-lg transition" style="${!state.r2SelectedSpeaker ? 'opacity:0.45; cursor:not-allowed;' : ''}">
-                  ${state.r2SelectedSpeaker ? `Mulai Estafet (${state.r2SelectedSpeaker})` : 'Pilih Nama Anda Terlebih Dahulu'}
+                  ${state.r2SelectedSpeaker ? `Mulai Estafet 30 Detik (${state.r2SelectedSpeaker})` : 'Pilih Nama Anda Terlebih Dahulu'}
                 </button>
               </div>
             ` : state.r2Timer > 0 ? `
@@ -1330,12 +1469,23 @@
               </div>
             ` : `
               <div class="py-6">
-                <h3 class="text-2xl font-extrabold text-slate-900 mb-1">Waktu Habis!</h3>
-                <p class="text-sm text-slate-600 mb-5">${team.name} (Pemandu: <strong>${state.r2SelectedSpeaker}</strong>) berhasil menebak <strong>${state.r2CorrectCount} kata</strong> (+<strong>${Math.max(0, state.r2SessionScore)} poin</strong>).</p>
-                <button onclick="nextR2Team()" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
-                  <span>${hasMoreTeams ? `Lanjut ke ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 3: Misi Darurat Pelayanan'}</span>
-                  <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                </button>
+                <div class="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-3">
+                  <i data-lucide="check-circle-2" class="w-8 h-8"></i>
+                </div>
+                <h3 class="text-2xl font-extrabold text-slate-900 mb-1">Waktu 30 Detik Selesai!</h3>
+                <p class="text-sm text-slate-600 mb-6">${team.name} (Pemandu: <strong>${state.r2SelectedSpeaker}</strong>) berhasil menebak <strong>${state.r2CorrectCount} kata</strong> (+<strong>${Math.max(0, state.r2SessionScore)} poin</strong>).</p>
+
+                <div class="max-w-md mx-auto space-y-2.5">
+                  <button onclick="openDashboardScreen(${state.activeTeamIdx}, '${(state.r2SelectedSpeaker || '').replace(/'/g, "\\'")}')" class="w-full py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm inline-flex items-center justify-center gap-2 shadow-md">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                    <span>Ke Menu Dashboard (${state.r2SelectedSpeaker})</span>
+                  </button>
+
+                  <button onclick="nextR2Team()" class="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
+                    <span>${hasMoreTeams ? `Lanjut ke ${state.teams[state.activeTeamIdx + 1].name}` : 'Lanjut ke Ronde 3: Misi Darurat (30 Detik)'}</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                  </button>
+                </div>
               </div>
             `}
           </div>
@@ -1350,7 +1500,7 @@
       state.r2Running = true;
       state.r2Interval = setInterval(() => {
         state.r2Timer--;
-        if (state.r2Timer <= 10 && state.r2Timer > 0) playTick(true);
+        if (state.r2Timer <= 7 && state.r2Timer > 0) playTick(true);
         if (state.r2Timer <= 0) {
           clearTimers();
           state.r2Running = false;
@@ -1358,6 +1508,7 @@
           state.teams[state.activeTeamIdx].score += finalAdd;
           state.teams[state.activeTeamIdx].r2Points = finalAdd;
           state.teams[state.activeTeamIdx].r2Words = state.r2CorrectCount;
+          state.teams[state.activeTeamIdx].r2Completed = true;
           playFanfare();
         }
         render();
@@ -1384,7 +1535,7 @@
       if (state.activeTeamIdx + 1 < state.teams.length) {
         state.activeTeamIdx++;
         state.r2SelectedSpeaker = null;
-        state.r2Timer = 60;
+        state.r2Timer = ROUND_DURATION_SECONDS;
         state.r2Running = false;
         state.r2SessionScore = 0;
         state.r2CorrectCount = 0;
@@ -1393,13 +1544,14 @@
         state.r3SelectedDecisionMaker = null;
         state.r3Idx = 0;
         state.r3SelectedOption = null;
+        state.r3Timer = ROUND_DURATION_SECONDS;
         state.screen = 'round3';
       }
       render();
     }
 
     // ==========================================
-    // RONDE 3: MISI DARURAT PELAYANAN
+    // RONDE 3: MISI DARURAT PELAYANAN (30 DETIK / KASUS)
     // ==========================================
     function selectR3DecisionMaker(memberName) {
       playTone(540, 'sine', 0.08, 0.1);
@@ -1417,16 +1569,16 @@
       const hasMoreScenarios = state.r3Idx + 1 < totalScenarios;
       const hasMoreTeams = state.activeTeamIdx + 1 < state.teams.length;
 
-      let nextBtnLabel = 'Selesai & Simpan ke Supabase';
+      let nextBtnLabel = 'Selesai & Alihkan ke Menu Dashboard';
       if (hasMoreScenarios) {
         nextBtnLabel = `Lanjut ke Pertanyaan Berikutnya (Kasus ${state.r3Idx + 2} dari ${totalScenarios})`;
       } else if (hasMoreTeams) {
-        nextBtnLabel = `Lanjut ke Giliran ${state.teams[state.activeTeamIdx + 1].name}`;
+        nextBtnLabel = `Selesai & Lanjut ke ${state.teams[state.activeTeamIdx + 1].name}`;
       }
 
       return `
         <div class="space-y-4">
-          ${renderPrivateScoreBar('Ronde 3: Misi Darurat Pelayanan', 'Pilih nama pengambil keputusan dari anggota tim, lalu selesaikan seluruh studi kasus!')}
+          ${renderPrivateScoreBar('Ronde 3: Misi Darurat Pelayanan (30 Detik/Kasus)', 'Pilih nama pengambil keputusan dari anggota tim, lalu selesaikan 3 studi kasus!')}
 
           <div class="glass-card rounded-3xl p-5 sm:p-8">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -1439,7 +1591,7 @@
                 </span>
               </div>
               ${state.r3SelectedDecisionMaker ? `
-                <div class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold ${state.r3Timer <= 5 ? 'bg-rose-100 text-rose-600 animate-pulse-fast' : 'bg-slate-100 text-slate-700'}">
+                <div class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold ${state.r3Timer <= 7 ? 'bg-rose-600 text-white animate-pulse-fast' : 'bg-slate-100 text-slate-700'}">
                   <i data-lucide="clock" class="w-3.5 h-3.5"></i>
                   <span>${state.r3Timer} Detik</span>
                 </div>
@@ -1453,7 +1605,7 @@
                 </div>
                 <h3 class="text-xl font-extrabold text-slate-900 mb-1">Pilih Nama Anda (${team.name})</h3>
                 <p class="text-xs text-slate-600 mb-5">
-                  Klik <strong>nama Anda sendiri</strong> dari daftar anggota ${team.name} untuk menjawab <strong>${totalScenarios} studi kasus pelayanan</strong> secara beruntun di HP.
+                  Klik <strong>nama Anda sendiri</strong> dari daftar anggota ${team.name} untuk menjawab <strong>${totalScenarios} studi kasus pelayanan</strong> (waktu <strong>30 detik/kasus</strong>).
                 </p>
 
                 <div class="flex flex-wrap justify-center gap-2">
@@ -1496,7 +1648,14 @@
               </div>
 
               ${state.r3SelectedOption !== null ? `
-                <div class="mt-6">
+                <div class="mt-6 space-y-2.5">
+                  ${!hasMoreScenarios ? `
+                    <button onclick="openDashboardScreen(${state.activeTeamIdx}, '${(state.r3SelectedDecisionMaker || '').replace(/'/g, "\\'")}')" class="w-full py-4 rounded-2xl start-btn-gradient text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition">
+                      <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                      <span>Ke Menu Dashboard (${state.r3SelectedDecisionMaker})</span>
+                    </button>
+                  ` : ''}
+
                   <button onclick="nextR3Step()" class="w-full py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition">
                     <span>${nextBtnLabel}</span>
                     <i data-lucide="arrow-right" class="w-4 h-4"></i>
@@ -1511,10 +1670,10 @@
 
     function startR3Timer() {
       clearTimers();
-      state.r3Timer = 15;
+      state.r3Timer = ROUND_DURATION_SECONDS;
       state.r3Interval = setInterval(() => {
         state.r3Timer--;
-        if (state.r3Timer <= 5 && state.r3Timer > 0) playTick(true);
+        if (state.r3Timer <= 7 && state.r3Timer > 0) playTick(true);
         if (state.r3Timer <= 0) {
           clearTimers();
           if (state.r3SelectedOption === null) {
@@ -1539,6 +1698,9 @@
         choice: `${chosen.tag} (${chosen.text})`,
         score: chosen.score
       });
+      if (state.r3Idx + 1 >= ROUND3_SCENARIOS.length) {
+        team.r3Completed = true;
+      }
       if (chosen.score === 100) playSuccess();
       else playError();
       render();
@@ -1551,14 +1713,19 @@
         startR3Timer();
         render();
       } else if (state.activeTeamIdx + 1 < state.teams.length) {
+        const finishedMember = state.r3SelectedDecisionMaker;
+        const finishedTeamIdx = state.activeTeamIdx;
         state.activeTeamIdx++;
         state.r3Idx = 0;
         state.r3SelectedOption = null;
         state.r3SelectedDecisionMaker = null;
-        render();
+        // Alihkan ke Menu Dashboard agar pemain yang selesai bisa melihat hasil & tim berikutnya siap
+        await openDashboardScreen(finishedTeamIdx, finishedMember);
       } else {
-        state.selectedPrivateTeamIdx = null;
-        state.selectedPrivateMemberName = null;
+        const finishedMember = state.r3SelectedDecisionMaker;
+        const finishedTeamIdx = state.activeTeamIdx;
+        state.selectedPrivateTeamIdx = finishedTeamIdx;
+        state.selectedPrivateMemberName = finishedMember;
         state.screen = 'summary';
         playFanfare();
         if (typeof confetti === 'function') {
@@ -1589,7 +1756,9 @@
       `;
     }
 
-    // --- SCREEN 5: HASIL PRIVAT PESERTA ---
+    // ==========================================
+    // MENU DASHBOARD (PROGRES RONDE & NILAI PRIBADI PEMAIN)
+    // ==========================================
     function selectPrivateTeam(idx) {
       state.selectedPrivateTeamIdx = idx;
       state.selectedPrivateMemberName = null;
@@ -1603,8 +1772,13 @@
 
     function renderSummary() {
       const teamIdx = state.mode === 'single' ? 0 : state.selectedPrivateTeamIdx;
-      const chosenTeam = teamIdx !== null ? state.teams[teamIdx] : null;
+      const chosenTeam = teamIdx !== null && state.teams[teamIdx] ? state.teams[teamIdx] : null;
       const chosenMember = state.selectedPrivateMemberName;
+
+      // Cek ronde mana saja yang belum diselesaikan agar pemain bisa melanjutkan langsung dari Menu Dashboard
+      const r1IncompleteTeamIdx = state.teams.findIndex(t => !t.members.every(m => Boolean(t.r1PlayerSubmissions[m])));
+      const r2IncompleteTeamIdx = state.teams.findIndex(t => !t.r2Completed);
+      const r3IncompleteTeamIdx = state.teams.findIndex(t => !t.r3Completed);
 
       let personalMatchCount = 0;
       const personalHistory = [];
@@ -1638,113 +1812,200 @@
       } else if (state.saveStatus === 'saved') {
         syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3"><i data-lucide="cloud-check" class="w-3.5 h-3.5"></i> Tersimpan ke Database Supabase</div>`;
       } else {
-        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3"><i data-lucide="eye-off" class="w-3.5 h-3.5"></i> Hasil Privat Pemain</div>`;
+        syncBanner = `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 text-teal-300 text-xs font-bold mb-3"><i data-lucide="layout-dashboard" class="w-3.5 h-3.5"></i> Menu Dashboard Peserta &amp; Tim</div>`;
       }
 
       return `
-        <div class="glass-card rounded-3xl p-5 sm:p-8 text-center">
-          ${syncBanner}
-          <h2 class="text-xl sm:text-3xl font-extrabold text-slate-900 mb-2">Cek Nilai &amp; Hasil Anda Sendiri</h2>
-          <p class="text-xs sm:text-sm text-slate-600 max-w-xl mx-auto mb-6">
-            ${state.mode === 'multi'
-              ? 'Pilih <strong>tim Anda</strong> lalu klik <strong>nama Anda sendiri</strong> untuk melihat hasil pribadi Anda. Nilai pemain/tim lain tetap dirahasiakan.'
-              : 'Klik <strong>nama Anda sendiri</strong> di bawah ini untuk melihat nilai dan hasil pribadi Anda.'}
-          </p>
-
-          ${state.mode === 'multi' ? `
-            <div class="mb-5">
-              <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">1. Pilih Tim Anda:</p>
-              <div class="flex flex-wrap justify-center gap-2">
-                ${state.teams.map((t, idx) => `
-                  <button onclick="selectPrivateTeam(${idx})"
-                    class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${teamIdx === idx ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}">
-                    ${t.name}
-                  </button>
-                `).join('')}
+        <div class="space-y-5">
+          <!-- STATUS 3 RONDE & AKSES LANJUT BERMAIN -->
+          <div class="glass-card rounded-3xl p-5 sm:p-6">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div>
+                <h3 class="text-sm sm:text-base font-extrabold text-slate-900">Status Progres 3 Ronde (@30 Detik)</h3>
+                <p class="text-slate-500" style="font-size: 11px;">Peserta yang sudah selesai dapat memantau nilai di bawah, atau lanjutkan ronde berikutnya.</p>
               </div>
+              <button onclick="goHome()" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
+                Pengaturan Awal
+              </button>
             </div>
-          ` : ''}
 
-          ${chosenTeam ? `
-            <div class="mb-8">
-              <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">
-                ${state.mode === 'multi' ? `2. Pilih Nama Anda (${chosenTeam.name}):` : 'Pilih Nama Anda:'}
-              </p>
-              <div class="flex flex-wrap justify-center gap-2">
-                ${chosenTeam.members.map(m => `
-                  <button onclick="selectPrivateMember('${m.replace(/'/g, "\\'")}')"
-                    class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${chosenMember === m ? 'border-sky-600 bg-sky-600 text-white shadow-md' : 'border-slate-200 bg-white text-slate-700 hover:border-sky-400'}">
-                    ${m}
-                  </button>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-
-          ${chosenTeam && chosenMember ? `
-            <div class="max-w-xl mx-auto p-5 sm:p-6 rounded-2xl bg-white border-2 border-sky-200 shadow-md text-left mb-8">
-              <div class="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <!-- Kartu Status Ronde 1 -->
+              <div class="p-3.5 rounded-2xl border ${r1IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-sky-200 bg-sky-50'} flex flex-col justify-between">
                 <div>
-                  <span class="font-bold uppercase tracking-wider text-sky-600" style="font-size: 11px;">Kartu Hasil Pribadi</span>
-                  <h3 class="text-lg sm:text-xl font-extrabold text-slate-900">${chosenMember}</h3>
-                  <p class="text-xs text-slate-500">${chosenTeam.name}</p>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="font-extrabold text-xs text-slate-900">Ronde 1 • Frekuensi</span>
+                    <span class="font-bold px-2 py-0.5 rounded ${r1IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'}" style="font-size: 10px;">
+                      ${r1IncompleteTeamIdx === -1 ? '✓ Selesai' : 'Berjalan'}
+                    </span>
+                  </div>
+                  <p class="text-slate-600 mb-3" style="font-size: 11px;">
+                    ${r1IncompleteTeamIdx === -1 ? 'Semua anggota tim telah menjawab.' : `Giliran ${state.teams[r1IncompleteTeamIdx].name}`}
+                  </p>
                 </div>
-                <div class="text-right">
-                  <div class="text-2xl sm:text-3xl font-black text-sky-600">${personalTotalScore}</div>
-                  <span class="font-bold text-slate-400" style="font-size: 11px;">NILAI ANDA</span>
-                </div>
+                ${r1IncompleteTeamIdx !== -1 ? `
+                  <button onclick="resumeRoundFromDashboard('round1', ${r1IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs">
+                    Lanjut Ronde 1 →
+                  </button>
+                ` : ''}
               </div>
 
-              <div class="my-4">
-                <span class="px-3 py-1 rounded-full border text-xs font-bold ${pred.badge}">
-                  ${pred.emoji} ${pred.title}
-                </span>
+              <!-- Kartu Status Ronde 2 -->
+              <div class="p-3.5 rounded-2xl border ${r2IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-teal-200 bg-teal-50'} flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="font-extrabold text-xs text-slate-900">Ronde 2 • Estafet Kata</span>
+                    <span class="font-bold px-2 py-0.5 rounded ${r2IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-teal-600 text-white'}" style="font-size: 10px;">
+                      ${r2IncompleteTeamIdx === -1 ? '✓ Selesai' : '30 Detik'}
+                    </span>
+                  </div>
+                  <p class="text-slate-600 mb-3" style="font-size: 11px;">
+                    ${r2IncompleteTeamIdx === -1 ? 'Semua tim sudah estafet kata.' : `Siap untuk ${state.teams[r2IncompleteTeamIdx].name}`}
+                  </p>
+                </div>
+                ${r2IncompleteTeamIdx !== -1 ? `
+                  <button onclick="resumeRoundFromDashboard('round2', ${r2IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs">
+                    Main Ronde 2 →
+                  </button>
+                ` : ''}
               </div>
 
-              <div class="grid grid-cols-3 gap-2 text-center mb-4">
-                <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <p class="text-slate-500 font-semibold" style="font-size: 10px;">Keselarasan Anda</p>
-                  <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${personalHarmony}%</p>
-                  <p class="text-sky-600 font-bold" style="font-size: 10px;">+${personalR1Points} pts</p>
+              <!-- Kartu Status Ronde 3 -->
+              <div class="p-3.5 rounded-2xl border ${r3IncompleteTeamIdx === -1 ? 'border-emerald-200 bg-emerald-50' : 'border-indigo-200 bg-indigo-50'} flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="font-extrabold text-xs text-slate-900">Ronde 3 • Misi Darurat</span>
+                    <span class="font-bold px-2 py-0.5 rounded ${r3IncompleteTeamIdx === -1 ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}" style="font-size: 10px;">
+                      ${r3IncompleteTeamIdx === -1 ? '✓ Selesai' : '30 Detik'}
+                    </span>
+                  </div>
+                  <p class="text-slate-600 mb-3" style="font-size: 11px;">
+                    ${r3IncompleteTeamIdx === -1 ? 'Semua studi kasus selesai.' : `Siap untuk ${state.teams[r3IncompleteTeamIdx].name}`}
+                  </p>
                 </div>
-                <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <p class="text-slate-500 font-semibold" style="font-size: 10px;">Estafet Kata Tim</p>
-                  <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${chosenTeam.r2Words} kata</p>
-                  <p class="text-teal-600 font-bold" style="font-size: 10px;">+${chosenTeam.r2Points} pts</p>
-                </div>
-                <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <p class="text-slate-500 font-semibold" style="font-size: 10px;">Misi Pelayanan</p>
-                  <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">+${chosenTeam.r3Score}</p>
-                  <p class="text-indigo-600 font-bold" style="font-size: 10px;">3 Studi Kasus</p>
-                </div>
+                ${r3IncompleteTeamIdx !== -1 ? `
+                  <button onclick="resumeRoundFromDashboard('round3', ${r3IncompleteTeamIdx})" class="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs">
+                    Main Ronde 3 →
+                  </button>
+                ` : ''}
               </div>
+            </div>
+          </div>
 
-              ${personalHistory.length > 0 ? `
-                <div class="space-y-2 pt-3 border-t border-slate-100">
-                  <p class="font-bold uppercase tracking-wider text-slate-500" style="font-size: 11px;">Catatan Jawaban Anda (5 Pertanyaan):</p>
-                  ${personalHistory.map(item => `
-                    <div class="p-2.5 rounded-xl bg-slate-50 text-xs flex items-center justify-between gap-2">
-                      <span class="text-slate-600 truncate">Q${item.qNum}: ${item.myAnswer}</span>
-                      <span class="flex-shrink-0 px-2 py-0.5 rounded font-bold ${item.isMatched ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}" style="font-size: 10px;">
-                        ${item.isMatched ? 'Satu Frekuensi' : 'Pilihan Unik'}
-                      </span>
-                    </div>
+          <!-- KARTU HASIL & NILAI PRIBADI PEMAIN -->
+          <div class="glass-card rounded-3xl p-5 sm:p-8 text-center">
+            ${syncBanner}
+            <h2 class="text-xl sm:text-3xl font-extrabold text-slate-900 mb-2">Dashboard Nilai &amp; Hasil Anda</h2>
+            <p class="text-xs sm:text-sm text-slate-600 max-w-xl mx-auto mb-6">
+              ${state.mode === 'multi'
+                ? 'Pilih <strong>tim Anda</strong> lalu klik <strong>nama Anda sendiri</strong> untuk melihat rincian hasil dan jawaban Anda.'
+                : 'Klik <strong>nama Anda sendiri</strong> di bawah ini untuk melihat rincian hasil dan jawaban Anda.'}
+            </p>
+
+            ${state.mode === 'multi' ? `
+              <div class="mb-5">
+                <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">1. Pilih Tim Anda:</p>
+                <div class="flex flex-wrap justify-center gap-2">
+                  ${state.teams.map((t, idx) => `
+                    <button onclick="selectPrivateTeam(${idx})"
+                      class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition ${teamIdx === idx ? 'border-slate-900 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'}">
+                      ${t.name}
+                    </button>
                   `).join('')}
                 </div>
-              ` : ''}
-            </div>
-          ` : `
-            <div class="max-w-md mx-auto p-6 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs mb-8">
-              ${!chosenTeam
-                ? 'Silakan pilih tim Anda terlebih dahulu, lalu pilih nama Anda sendiri.'
-                : 'Silakan klik nama Anda sendiri di atas untuk menampilkan kartu nilai pribadi Anda.'}
-            </div>
-          `}
+              </div>
+            ` : ''}
 
-          <div class="flex flex-wrap justify-center gap-3">
-            <button onclick="goHome()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm">
-              Selesai / Kembali ke Awal
-            </button>
+            ${chosenTeam ? `
+              <div class="mb-8">
+                <p class="font-bold uppercase tracking-wider text-slate-400 mb-2" style="font-size: 11px;">
+                  ${state.mode === 'multi' ? `2. Pilih Nama Anda (${chosenTeam.name}):` : 'Pilih Nama Anda:'}
+                </p>
+                <div class="flex flex-wrap justify-center gap-2">
+                  ${chosenTeam.members.map(m => {
+                    const hasAnsweredR1 = Boolean(chosenTeam.r1PlayerSubmissions[m]);
+                    return `
+                      <button onclick="selectPrivateMember('${m.replace(/'/g, "\\'")}')"
+                        class="px-4 py-2.5 rounded-xl border-2 text-xs sm:text-sm font-bold transition inline-flex items-center gap-1.5 ${chosenMember === m ? 'border-sky-600 bg-sky-600 text-white shadow-md' : 'border-slate-200 bg-white text-slate-700 hover:border-sky-400'}">
+                        <span>${m}</span>
+                        ${hasAnsweredR1 ? `<span class="w-2 h-2 rounded-full ${chosenMember === m ? 'bg-teal-300' : 'bg-emerald-500'}"></span>` : ''}
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            ${chosenTeam && chosenMember ? `
+              <div class="max-w-xl mx-auto p-5 sm:p-6 rounded-2xl bg-white border-2 border-sky-200 shadow-md text-left mb-6">
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-100">
+                  <div>
+                    <span class="font-bold uppercase tracking-wider text-sky-600" style="font-size: 11px;">Kartu Dashboard Pribadi</span>
+                    <h3 class="text-lg sm:text-xl font-extrabold text-slate-900">${chosenMember}</h3>
+                    <p class="text-xs text-slate-500">${chosenTeam.name}</p>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-2xl sm:text-3xl font-black text-sky-600">${personalTotalScore}</div>
+                    <span class="font-bold text-slate-400" style="font-size: 11px;">TOTAL SKOR TIM</span>
+                  </div>
+                </div>
+
+                <div class="my-4">
+                  <span class="px-3 py-1 rounded-full border text-xs font-bold ${pred.badge}">
+                    ${pred.emoji} ${pred.title}
+                  </span>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                  <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-slate-500 font-semibold" style="font-size: 10px;">R1: Frekuensi</p>
+                    <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${personalHarmony}%</p>
+                    <p class="text-sky-600 font-bold" style="font-size: 10px;">+${personalR1Points} pts</p>
+                  </div>
+                  <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-slate-500 font-semibold" style="font-size: 10px;">R2: Estafet Kata</p>
+                    <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">${chosenTeam.r2Words} kata</p>
+                    <p class="text-teal-600 font-bold" style="font-size: 10px;">+${chosenTeam.r2Points} pts</p>
+                  </div>
+                  <div class="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-slate-500 font-semibold" style="font-size: 10px;">R3: Misi Darurat</p>
+                    <p class="text-sm sm:text-base font-black text-slate-900 mt-0.5">+${chosenTeam.r3Score}</p>
+                    <p class="text-indigo-600 font-bold" style="font-size: 10px;">3 Studi Kasus</p>
+                  </div>
+                </div>
+
+                ${personalHistory.length > 0 ? `
+                  <div class="space-y-2 pt-3 border-t border-slate-100">
+                    <p class="font-bold uppercase tracking-wider text-slate-500" style="font-size: 11px;">Catatan Jawaban ${chosenMember} (Ronde 1):</p>
+                    ${personalHistory.map(item => `
+                      <div class="p-2.5 rounded-xl bg-slate-50 text-xs flex items-center justify-between gap-2">
+                        <span class="text-slate-600 truncate">Q${item.qNum}: ${item.myAnswer}</span>
+                        <span class="flex-shrink-0 px-2 py-0.5 rounded font-bold ${item.isMatched ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}" style="font-size: 10px;">
+                          ${item.isMatched ? 'Satu Frekuensi' : 'Pilihan Unik'}
+                        </span>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : `
+                  <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+                    <strong>${chosenMember}</strong> belum menyelesaikan jawaban Ronde 1. Klik tombol <strong>Lanjut Ronde 1</strong> di atas untuk mulai menjawab.
+                  </div>
+                `}
+              </div>
+            ` : `
+              <div class="max-w-md mx-auto p-6 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-xs mb-6">
+                ${!chosenTeam
+                  ? 'Silakan pilih tim Anda terlebih dahulu, lalu pilih nama Anda sendiri.'
+                  : 'Silakan klik nama Anda sendiri di atas untuk menampilkan kartu nilai pribadi Anda.'}
+              </div>
+            `}
+
+            <div class="flex flex-wrap justify-center gap-3">
+              <button onclick="openAdminModal()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm inline-flex items-center justify-center gap-2">
+                <i data-lucide="bar-chart-3" class="w-4 h-4 text-teal-400"></i>
+                <span>Lihat Rekapitulasi Admin</span>
+              </button>
+            </div>
           </div>
         </div>
       `;
